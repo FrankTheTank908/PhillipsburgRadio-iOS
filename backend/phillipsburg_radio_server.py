@@ -57,6 +57,7 @@ DEFAULT_TRANSCRIPTS_PATH = "/var/lib/phillipsburg-radio/transcripts.jsonl"
 DEFAULT_INCIDENTS_PATH = "/var/lib/phillipsburg-radio/incidents.jsonl"
 DEFAULT_INCIDENT_STATE_PATH = "/var/lib/phillipsburg-radio/incident-state.json"
 DEFAULT_ENTITLEMENTS_PATH = "/var/lib/phillipsburg-radio/entitlements.json"
+DEFAULT_PLAY_SESSIONS_PATH = "/var/lib/phillipsburg-radio/play-sessions.json"
 DEFAULT_PIPELINE_STATUS_PATH = "/var/lib/phillipsburg-radio/transcript-pipeline-status.json"
 DEFAULT_MAX_TRANSCRIPTS = 200
 DEFAULT_MAX_INCIDENTS = 200
@@ -78,6 +79,7 @@ class BackendState:
         self.incidents_path = os.environ.get("INCIDENTS_PATH", DEFAULT_INCIDENTS_PATH).strip()
         self.incident_state_path = os.environ.get("INCIDENT_STATE_PATH", DEFAULT_INCIDENT_STATE_PATH).strip()
         self.entitlements_path = os.environ.get("ENTITLEMENTS_PATH", DEFAULT_ENTITLEMENTS_PATH).strip()
+        self.play_sessions_path = os.environ.get("PLAY_SESSIONS_PATH", DEFAULT_PLAY_SESSIONS_PATH).strip()
         self.pipeline_status_path = os.environ.get("PIPELINE_STATUS_PATH", DEFAULT_PIPELINE_STATUS_PATH).strip()
         self.ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
         self.cache_seconds = int(os.environ.get("CACHE_SECONDS", str(DEFAULT_CACHE_SECONDS)))
@@ -85,6 +87,7 @@ class BackendState:
         self.admin_token = os.environ.get("BACKEND_ADMIN_TOKEN", "").strip()
         self.allow_debug_admin_without_token = env_bool("ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN", True)
         self.allow_debug_ad_access = env_bool("ALLOW_DEBUG_AD_ACCESS", True)
+        self.require_play_token_for_stream = env_bool("REQUIRE_PLAY_TOKEN_FOR_STREAM", False)
         self.app_store_debug_trust_client = env_bool("APP_STORE_DEBUG_TRUST_CLIENT", False)
         self.premium_product_ids = {
             value.strip()
@@ -102,9 +105,11 @@ class BackendState:
         self.logs: List[Dict[str, str]] = []
         self.log("info", "Backend initialized")
 
-    def get_config(self, force: bool = False, feed_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_config(self, force: bool = False, feed_id: Optional[str] = None, play_token: Optional[str] = None) -> Dict[str, Any]:
         now = time.time()
         requested_feed_id = str(feed_id or self.feed_id).strip() or self.feed_id
+        if self.require_play_token_for_stream and not self.is_play_token_valid(str(play_token or ""), requested_feed_id):
+            raise PermissionError("A valid play session is required for this feed.")
         with self.lock:
             cached = self.feed_config_cache.get(requested_feed_id)
             if cached and not force and now - self.last_refresh_epoch < self.cache_seconds:
@@ -149,6 +154,7 @@ class BackendState:
                 "hasOpenAIKey": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                 "debugAdminNoAuth": self.allow_debug_admin_without_token,
                 "debugAdAccess": self.allow_debug_ad_access,
+                "requiresPlayToken": self.require_play_token_for_stream,
                 "transcriptPipeline": self.pipeline_status(),
                 "lastRefreshEpoch": self.last_refresh_epoch,
                 "lastError": self.last_error,
@@ -326,16 +332,49 @@ class BackendState:
         account_token = str(payload.get("appAccountToken") or payload.get("deviceAccountToken") or "").strip()
         feed_id = str(payload.get("feedId") or self.feed_id).strip()
         if self.has_active_entitlement(account_token):
-            return {"ok": True, "allowed": True, "reason": "premium", "feedId": feed_id}
+            return self.create_play_session(feed_id=feed_id, account_token=account_token, reason="premium")
         if self.allow_debug_ad_access:
-            return {
-                "ok": True,
-                "allowed": True,
-                "reason": "debug-ad-session",
-                "feedId": feed_id,
-                "expiresAt": iso_from_millis(int(time.time() * 1000) + 30 * 60 * 1000),
-            }
+            return self.create_play_session(feed_id=feed_id, account_token=account_token, reason="debug-ad-session")
         return {"ok": True, "allowed": False, "reason": "premium-or-rewarded-ad-required", "feedId": feed_id}
+
+    def create_play_session(self, feed_id: str, account_token: str, reason: str) -> Dict[str, Any]:
+        expires_ms = int(time.time() * 1000) + 30 * 60 * 1000
+        token = uuid.uuid4().hex
+        sessions = read_json_if_exists(self.play_sessions_path) or {"sessions": {}}
+        session = {
+            "token": token,
+            "feedId": feed_id,
+            "accountToken": account_token,
+            "reason": reason,
+            "expiresAt": iso_from_millis(expires_ms),
+            "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        sessions.setdefault("sessions", {})[token] = session
+        write_json(self.play_sessions_path, sessions)
+        self.log("info", f"Play session issued feed={feed_id} reason={reason}")
+        return {
+            "ok": True,
+            "allowed": True,
+            "reason": reason,
+            "feedId": feed_id,
+            "playToken": token,
+            "expiresAt": session["expiresAt"],
+        }
+
+    def is_play_token_valid(self, token: str, feed_id: str) -> bool:
+        if not token:
+            return False
+        sessions = read_json_if_exists(self.play_sessions_path) or {}
+        session = (sessions.get("sessions") or {}).get(token)
+        if not isinstance(session, dict):
+            return False
+        if str(session.get("feedId") or "") != feed_id:
+            return False
+        try:
+            expires_at = str(session.get("expiresAt") or "").replace("Z", "+00:00")
+            return datetime.fromisoformat(expires_at) > datetime.now(timezone.utc)
+        except ValueError:
+            return False
 
     def has_active_entitlement(self, account_token: str) -> bool:
         if not account_token:
@@ -396,7 +435,8 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path in {"/current-feed.json", "/config"}:
                 force = query.get("refresh", ["0"])[0] == "1" or query.get("force", ["0"])[0] == "1"
                 feed_id = query.get("feedId", query.get("feed_id", [""]))[0].strip() or None
-                self.respond_json(STATE.get_config(force=force, feed_id=feed_id))
+                play_token = query.get("playToken", query.get("play_token", [""]))[0].strip() or None
+                self.respond_json(STATE.get_config(force=force, feed_id=feed_id, play_token=play_token))
                 return
 
             if parsed.path.startswith("/catalog/"):
@@ -443,6 +483,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             self.respond_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+        except PermissionError as error:
+            self.respond_json({"error": str(error)}, HTTPStatus.FORBIDDEN)
         except Exception as error:
             STATE.log("error", f"Request failed for {self.path}: {error}")
             self.respond_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -493,6 +535,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
         except ValueError as error:
             self.respond_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+        except PermissionError as error:
+            self.respond_json({"error": str(error)}, HTTPStatus.FORBIDDEN)
         except Exception as error:
             STATE.log("error", f"POST failed for {self.path}: {error}")
             self.respond_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)

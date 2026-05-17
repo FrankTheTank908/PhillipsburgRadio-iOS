@@ -6,6 +6,7 @@ import StoreKit
 final class MonetizationStore: ObservableObject {
     @Published private(set) var isPremium = false
     @Published private(set) var hasAdSession = false
+    @Published private(set) var playToken: String?
     @Published private(set) var isWorking = false
     @Published private(set) var statusText = "Free access"
     @Published private(set) var lastError: String?
@@ -39,6 +40,12 @@ final class MonetizationStore: ObservableObject {
 
     func attachLogger(_ logger: AppLogStore) {
         self.logger = logger
+    }
+
+    func clearPlaySession() {
+        hasAdSession = false
+        playToken = nil
+        statusText = isPremium ? "Premium active" : "Free access"
     }
 
     func refreshEntitlements(feedConfigURL: String) async {
@@ -132,6 +139,7 @@ final class MonetizationStore: ObservableObject {
 
             let decoded = try JSONDecoder().decode(PlaySessionResponse.self, from: data)
             hasAdSession = decoded.allowed
+            playToken = decoded.playToken
             statusText = decoded.allowed ? "Ad session active" : "Free access"
             lastError = decoded.allowed ? nil : decoded.reason
             return decoded.allowed

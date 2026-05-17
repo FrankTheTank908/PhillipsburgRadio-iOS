@@ -30,25 +30,26 @@ final class RadioPlayer: ObservableObject {
     private var logger: AppLogStore?
     private var currentSettings: PlayerSettingsSnapshot = .default
     private var currentFeed: CatalogItem?
+    private var currentPlayToken: String?
 
     func attachLogger(_ logger: AppLogStore) {
         self.logger = logger
     }
 
-    func playOrStop(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) {
+    func playOrStop(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil, playToken: String? = nil) {
         if wantsPlayback || isLoading {
             stop()
         } else {
-            Task { await start(using: settings, feed: feed) }
+            Task { await start(using: settings, feed: feed, playToken: playToken) }
         }
     }
 
-    func start(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
-        await startPlayback(resetRetryCount: true, settings: settings, feed: feed)
+    func start(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil, playToken: String? = nil) async {
+        await startPlayback(resetRetryCount: true, settings: settings, feed: feed, playToken: playToken)
     }
 
-    func refreshAndRetry(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
-        await startPlayback(resetRetryCount: true, settings: settings, feed: feed)
+    func refreshAndRetry(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil, playToken: String? = nil) async {
+        await startPlayback(resetRetryCount: true, settings: settings, feed: feed, playToken: playToken)
     }
 
     func stop() {
@@ -65,10 +66,18 @@ final class RadioPlayer: ObservableObject {
         statusText = "Stopped"
     }
 
-    private func startPlayback(resetRetryCount: Bool, settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
+    private func startPlayback(
+        resetRetryCount: Bool,
+        settings: PlayerSettingsSnapshot,
+        feed: CatalogItem? = nil,
+        playToken: String? = nil
+    ) async {
         currentSettings = settings
         if let feed {
             currentFeed = feed
+        }
+        if let playToken {
+            currentPlayToken = playToken
         }
         retryTask?.cancel()
         retryTask = nil
@@ -93,6 +102,7 @@ final class RadioPlayer: ObservableObject {
             let config = try await feedService.fetchCurrentConfig(
                 feedConfigURL: settings.feedConfigURL,
                 feedId: feed?.resolvedFeedId,
+                playToken: currentPlayToken,
                 forceRefresh: shouldForceRefresh
             )
 
@@ -267,6 +277,7 @@ final class RadioPlayer: ObservableObject {
         retryTask?.cancel()
         let retrySettings = currentSettings
         let retryFeed = currentFeed
+        let retryPlayToken = currentPlayToken
         retryTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 1_500_000_000)
@@ -276,7 +287,7 @@ final class RadioPlayer: ObservableObject {
 
             guard !Task.isCancelled else { return }
 
-            await self?.startPlayback(resetRetryCount: false, settings: retrySettings, feed: retryFeed)
+            await self?.startPlayback(resetRetryCount: false, settings: retrySettings, feed: retryFeed, playToken: retryPlayToken)
         }
     }
 

@@ -140,7 +140,7 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
 
                     Button {
-                        Task { await radioPlayer.refreshAndRetry(using: settingsStore.playerSettings, feed: selectedFeed) }
+                        Task { await startPlaybackForSelectedFeed(forceRefresh: true) }
                     } label: {
                         Label("Refresh URL", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
@@ -449,6 +449,7 @@ struct ContentView: View {
         Button {
             selectedFeed = feed
             radioPlayer.stop()
+            monetizationStore.clearPlaySession()
             logStore.info("Selected feed \(feed.name) id=\(feed.resolvedFeedId)")
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -764,8 +765,31 @@ struct ContentView: View {
         }
     }
 
-    private func startPlaybackForSelectedFeed() async {
-        await radioPlayer.start(using: settingsStore.playerSettings, feed: selectedFeed)
+    private func startPlaybackForSelectedFeed(forceRefresh: Bool = false) async {
+        if monetizationStore.playToken == nil {
+            let granted = await monetizationStore.requestRewardedPlay(
+                feedConfigURL: settingsStore.trimmedFeedConfigURL,
+                feedId: selectedFeed?.resolvedFeedId
+            )
+            guard granted else {
+                isShowingAccessGate = true
+                return
+            }
+        }
+
+        if forceRefresh {
+            await radioPlayer.refreshAndRetry(
+                using: settingsStore.playerSettings,
+                feed: selectedFeed,
+                playToken: monetizationStore.playToken
+            )
+        } else {
+            await radioPlayer.start(
+                using: settingsStore.playerSettings,
+                feed: selectedFeed,
+                playToken: monetizationStore.playToken
+            )
+        }
     }
 
     private var rewardCustomData: String {

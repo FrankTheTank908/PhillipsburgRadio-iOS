@@ -24,7 +24,12 @@ enum FeedURLError: LocalizedError {
 }
 
 final class FeedURLService {
-    func fetchCurrentConfig(feedConfigURL: String, feedId: String? = nil, forceRefresh: Bool = false) async throws -> FeedConfig {
+    func fetchCurrentConfig(
+        feedConfigURL: String,
+        feedId: String? = nil,
+        playToken: String? = nil,
+        forceRefresh: Bool = false
+    ) async throws -> FeedConfig {
         guard !feedConfigURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw FeedURLError.missingConfigURL
         }
@@ -40,6 +45,13 @@ final class FeedURLService {
             var queryItems = components.queryItems ?? []
             queryItems.removeAll { $0.name == "feedId" || $0.name == "feed_id" }
             queryItems.append(URLQueryItem(name: "feedId", value: feedId.trimmingCharacters(in: .whitespacesAndNewlines)))
+            components.queryItems = queryItems
+        }
+
+        if let playToken, !playToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "playToken" || $0.name == "play_token" }
+            queryItems.append(URLQueryItem(name: "playToken", value: playToken.trimmingCharacters(in: .whitespacesAndNewlines)))
             components.queryItems = queryItems
         }
 
@@ -76,8 +88,8 @@ final class FeedURLService {
         return config
     }
 
-    func fetchCurrentStreamURL(feedConfigURL: String, feedId: String? = nil) async throws -> URL {
-        let config = try await fetchCurrentConfig(feedConfigURL: feedConfigURL, feedId: feedId)
+    func fetchCurrentStreamURL(feedConfigURL: String, feedId: String? = nil, playToken: String? = nil) async throws -> URL {
+        let config = try await fetchCurrentConfig(feedConfigURL: feedConfigURL, feedId: feedId, playToken: playToken)
         return try validatedStreamURL(from: config)
     }
 

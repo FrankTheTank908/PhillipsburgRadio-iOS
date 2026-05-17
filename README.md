@@ -148,6 +148,7 @@ Runtime configuration is written into the Pi image by GitHub Actions and copied 
 | `ADMOB_APP_ID` / `ADMOB_REWARDED_AD_UNIT_ID` | AdMob identifiers injected into the IPA |
 | `APP_STORE_DEBUG_TRUST_CLIENT` | Debug-only client transaction trust switch, default `0` |
 | `ALLOW_DEBUG_AD_ACCESS` | Debug rewarded-play bypass, default `1` for personal builds |
+| `REQUIRE_PLAY_TOKEN_FOR_STREAM` | Require a Pi-issued play token before `/current-feed.json` returns stream URLs |
 | `BACKEND_PORT` | Pi-local HTTP port, currently `80` |
 
 Transcript tuning is also controlled through env values:
@@ -213,6 +214,7 @@ The Pi stores mutable app data under `/var/lib/phillipsburg-radio`:
 | `incident-state.json` | Grouped incident summaries |
 | `incidents.jsonl` | Local incident chat notes |
 | `entitlements.json` | Pi-side premium entitlement cache |
+| `play-sessions.json` | Short-lived Pi-issued play tokens |
 | `transcript-pipeline-status.json` | Worker status shown in `/health` and `/transcripts` |
 | `archive-state.json` | Processed archive IDs |
 | `recordings/` | Raw and cleaned audio chunks |

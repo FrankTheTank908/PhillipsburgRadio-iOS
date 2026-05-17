@@ -96,6 +96,7 @@ jobs:
           PREMIUM_PRODUCT_IDS: ${{ secrets.PREMIUM_PRODUCT_IDS }}
           APP_STORE_DEBUG_TRUST_CLIENT: ${{ secrets.APP_STORE_DEBUG_TRUST_CLIENT }}
           ALLOW_DEBUG_AD_ACCESS: ${{ secrets.ALLOW_DEBUG_AD_ACCESS }}
+          REQUIRE_PLAY_TOKEN_FOR_STREAM: ${{ secrets.REQUIRE_PLAY_TOKEN_FOR_STREAM }}
         run: |
           set -euo pipefail
 
@@ -139,6 +140,7 @@ jobs:
               "PREMIUM_PRODUCT_IDS": os.environ.get("PREMIUM_PRODUCT_IDS", "com.frankpinheiro.scanner.premium.monthly"),
               "APP_STORE_DEBUG_TRUST_CLIENT": os.environ.get("APP_STORE_DEBUG_TRUST_CLIENT", "0"),
               "ALLOW_DEBUG_AD_ACCESS": os.environ.get("ALLOW_DEBUG_AD_ACCESS", "1"),
+              "REQUIRE_PLAY_TOKEN_FOR_STREAM": os.environ.get("REQUIRE_PLAY_TOKEN_FOR_STREAM", "0"),
           }
 
           template_path = Path("backend/phillipsburg-radio.env.template")

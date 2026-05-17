@@ -54,6 +54,7 @@ struct PlaySessionResponse: Codable {
     let allowed: Bool
     let reason: String?
     let feedId: String?
+    let playToken: String?
     let expiresAt: String?
 }
 

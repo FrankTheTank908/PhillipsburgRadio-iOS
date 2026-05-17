@@ -14,6 +14,7 @@ os.environ["INCIDENTS_PATH"] = str(Path("build/test-incidents.jsonl").resolve())
 os.environ["INCIDENT_STATE_PATH"] = str(Path("build/test-incident-state.json").resolve())
 os.environ["PIPELINE_STATUS_PATH"] = str(Path("build/test-pipeline-status.json").resolve())
 os.environ["ENTITLEMENTS_PATH"] = str(Path("build/test-entitlements.json").resolve())
+os.environ["PLAY_SESSIONS_PATH"] = str(Path("build/test-play-sessions.json").resolve())
 os.environ["ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN"] = "1"
 
 MODULE_PATH = Path(__file__).with_name("phillipsburg_radio_server.py")
@@ -57,6 +58,11 @@ server.fetch_broadcastify_catalog = lambda action, api_key, params, api_base_url
 catalog = server.STATE.catalog("feeds", {"s": "city"}, force=True)
 assert catalog["items"][0]["name"] == "City Police Dispatch"
 assert catalog["items"][0]["feedId"] == "123"
+
+session = server.STATE.play_session({"deviceAccountToken": "device-test", "feedId": "123"})
+assert session["allowed"] is True
+assert server.STATE.is_play_token_valid(session["playToken"], "123") is True
+assert server.STATE.is_play_token_valid(session["playToken"], "999") is False
 
 payload = server.decode_unverified_jws_payload(
     "eyJhbGciOiJub25lIn0."
