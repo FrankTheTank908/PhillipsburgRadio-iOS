@@ -24,9 +24,23 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            coreutils quilt parted qemu-user-binfmt debootstrap zerofree zip \
+            coreutils quilt parted qemu-user-binfmt binfmt-support debootstrap zerofree zip \
             dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync xz-utils \
             file git curl bc gpg pigz xxd arch-test bmap-tools kmod
+
+      - name: Register arm64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Verify arm64 emulation
+        run: |
+          set -euo pipefail
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
+          docker run --privileged --rm tonistiigi/binfmt
+          sudo update-binfmts --enable qemu-aarch64 || true
+          sudo update-binfmts --display qemu-aarch64 || true
+          arch-test arm64 || true
 
       - name: Fetch pi-gen
         run: |
@@ -82,6 +96,17 @@ jobs:
         run: |
           set -euo pipefail
           sudo CLEAN=1 ./build.sh
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-gen-build-logs
+          path: |
+            pi-gen/work/**/debootstrap.log
+            pi-gen/work/**/*.log
+            pi-gen/deploy
+          if-no-files-found: ignore
 
       - name: Show deployed files
         run: |
