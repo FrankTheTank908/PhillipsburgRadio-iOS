@@ -5,19 +5,21 @@ struct ContentView: View {
     @StateObject private var settingsStore = SettingsStore()
     @StateObject private var logStore = AppLogStore()
     @StateObject private var transcriptStore = TranscriptStore()
+    @StateObject private var incidentStore = IncidentStore()
     @State private var isShowingSettings = false
     @State private var didAutoStart = false
+    @State private var incidentDraft = ""
 
     private let sampleTranscripts: [TranscriptEvent] = [
         TranscriptEvent(
             timestamp: "--:--",
-            text: "Waiting for live transcript events from your cloud backend.",
+            text: "Waiting for live transcript events from your Pi backend.",
             keywords: ["placeholder"],
             channel: "Dispatch"
         ),
         TranscriptEvent(
             timestamp: "--:--",
-            text: "Audio comes from the current Broadcastify stream URL in your hosted JSON config.",
+            text: "Audio comes from the current Broadcastify stream URL resolved by the Pi.",
             keywords: ["audio", "broadcastify"],
             channel: "Feed"
         ),
@@ -26,7 +28,7 @@ struct ContentView: View {
             text: "Future rows can include timestamp, text, confidence, keywords, and source channel.",
             confidence: 0.92,
             keywords: ["future", "transcript"],
-            channel: "Cloud"
+            channel: "Pi"
         )
     ]
 
@@ -38,6 +40,7 @@ struct ContentView: View {
                     playerSection
                     streamConfigSection
                     transcriptSection
+                    incidentSection
                 }
                 .padding(16)
             }
@@ -64,7 +67,9 @@ struct ContentView: View {
             .onAppear {
                 radioPlayer.attachLogger(logStore)
                 transcriptStore.attachLogger(logStore)
+                incidentStore.attachLogger(logStore)
                 configureTranscriptPolling()
+                configureIncidentPolling()
 
                 guard settingsStore.autoPlayOnLaunch, !didAutoStart else {
                     return
@@ -75,6 +80,7 @@ struct ContentView: View {
             }
             .onChange(of: settingsStore.feedConfigURL) { _ in
                 configureTranscriptPolling()
+                configureIncidentPolling()
             }
             .onChange(of: settingsStore.enableTranscriptPolling) { _ in
                 configureTranscriptPolling()
@@ -203,6 +209,53 @@ struct ContentView: View {
         }
     }
 
+    private var incidentSection: some View {
+        panel {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("Incident Chat", systemImage: "bubble.left.and.text.bubble.right")
+
+                HStack(alignment: .top, spacing: 8) {
+                    TextField("Add an incident note", text: $incidentDraft, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...3)
+
+                    Button {
+                        sendIncident()
+                    } label: {
+                        if incidentStore.isSending {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(incidentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || incidentStore.isSending)
+                    .accessibilityLabel("Send incident note")
+                }
+
+                if let error = incidentStore.lastError {
+                    Text("Incident chat backend not reachable: \(error)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if incidentStore.messages.isEmpty {
+                    Text("No incident notes yet.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(incidentStore.messages) { message in
+                        incidentRow(message)
+
+                        if message.id != incidentStore.messages.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var playButtonTitle: String {
         radioPlayer.isPlaying || radioPlayer.isLoading ? "Stop" : "Play"
     }
@@ -306,11 +359,51 @@ struct ContentView: View {
         .padding(.vertical, 4)
     }
 
+    private func incidentRow(_ message: IncidentMessage) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(message.timestamp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Label(message.author, systemImage: "person.crop.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 8)
+            }
+
+            Text(message.text)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !message.tags.isEmpty {
+                Text(message.tags.joined(separator: " | "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     private func configureTranscriptPolling() {
         if settingsStore.enableTranscriptPolling {
             transcriptStore.startPolling(feedConfigURL: settingsStore.trimmedFeedConfigURL)
         } else {
             transcriptStore.stopPolling()
+        }
+    }
+
+    private func configureIncidentPolling() {
+        incidentStore.startPolling(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+    }
+
+    private func sendIncident() {
+        let text = incidentDraft
+        Task {
+            if await incidentStore.send(text: text, feedConfigURL: settingsStore.trimmedFeedConfigURL) {
+                incidentDraft = ""
+            }
         }
     }
 }

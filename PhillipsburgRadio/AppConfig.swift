@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppConfig {
-    // Pi-only production endpoint. Do not put the Broadcastify API key or a
+    // Pi-only production endpoint. Do not put the Broadcastify domain key or a
     // rotating Broadcastify stream URL directly in the iPhone app.
     //
     // The Pi returns JSON like:
@@ -10,7 +10,7 @@ enum AppConfig {
     //   "streamUrl": "https://relay.broadcastify.com/example",
     //   "updatedAt": "2026-05-10T23:45:00Z",
     //   "expiresAt": "2026-05-10T23:50:00Z",
-    //   "source": "broadcastify-audio-api-pi-backend"
+    //   "source": "broadcastify-embed-player-pi-backend"
     // }
     static let feedConfigURL = "http://franksplex.com:5214/current-feed.json"
 
@@ -19,5 +19,8 @@ enum AppConfig {
     static let subtitle = "Broadcastify audio with live transcript support"
     static let automaticRetryLimit = 2
     static let stallRecoverySeconds = 12
+    // Personal debug build: admin tools are visible without a password.
+    // Set this to true before sharing a Release build outside your own devices.
+    static let requiresAdminPassword = false
     static let defaultAdminPassword = "change-me-admin"
 }

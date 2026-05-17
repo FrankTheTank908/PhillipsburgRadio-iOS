@@ -46,7 +46,7 @@ struct SettingsView: View {
         } header: {
             Text("Feed Config")
         } footer: {
-            Text("This URL should point to the Pi backend JSON endpoint. The app never needs your Broadcastify API key.")
+            Text("This URL should point to the Pi backend JSON endpoint. The app never needs your Broadcastify domain key.")
         }
     }
 
@@ -80,8 +80,8 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         Section {
-            Label("API key stays on the Pi backend, not in this app.", systemImage: "lock.shield")
-            Label("Admin unlock is a local debugging gate, not strong security.", systemImage: "exclamationmark.triangle")
+            Label("Domain key stays on the Pi backend, not in this app.", systemImage: "lock.shield")
+            Label("Admin tools are visible in this personal debug build.", systemImage: "exclamationmark.triangle")
         } header: {
             Text("Security")
         }
@@ -91,6 +91,12 @@ struct SettingsView: View {
         Section {
             if settingsStore.isAdminUnlocked {
                 adminUnlockedContent
+            } else if !AppConfig.requiresAdminPassword {
+                Button {
+                    unlockAdmin()
+                } label: {
+                    Label("Open Admin Tools", systemImage: "wrench.and.screwdriver")
+                }
             } else {
                 SecureField("Admin password", text: $adminPassword)
                     .textInputAutocapitalization(.never)
@@ -111,8 +117,16 @@ struct SettingsView: View {
         } header: {
             Text("Admin")
         } footer: {
-            Text("Default password is set in AppConfig.swift. Change it before sharing builds outside your own testing.")
+            Text(adminFooterText)
         }
+    }
+
+    private var adminFooterText: String {
+        if AppConfig.requiresAdminPassword {
+            return "Default password is set in AppConfig.swift. Change it before sharing builds outside your own testing."
+        }
+
+        return "Password unlock is disabled for this personal debug build. Set AppConfig.requiresAdminPassword before sharing a Release build."
     }
 
     private var adminUnlockedContent: some View {
@@ -145,19 +159,21 @@ struct SettingsView: View {
                 Label("Reset Public Settings", systemImage: "arrow.counterclockwise")
             }
 
-            SecureField("New admin password", text: $newAdminPassword)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            if AppConfig.requiresAdminPassword {
+                SecureField("New admin password", text: $newAdminPassword)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
 
-            Button("Save New Admin Password") {
-                saveAdminPassword()
-            }
+                Button("Save New Admin Password") {
+                    saveAdminPassword()
+                }
 
-            Button("Lock Admin Tools") {
-                settingsStore.lockAdmin()
-                adminPassword = ""
-                newAdminPassword = ""
-                adminMessage = nil
+                Button("Lock Admin Tools") {
+                    settingsStore.lockAdmin()
+                    adminPassword = ""
+                    newAdminPassword = ""
+                    adminMessage = nil
+                }
             }
 
             if let adminMessage {

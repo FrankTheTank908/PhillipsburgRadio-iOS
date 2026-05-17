@@ -1,5 +1,5 @@
 [Unit]
-Description=Phillipsburg Radio Broadcastify API backend
+Description=Phillipsburg Radio Broadcastify domain-key backend
 Wants=network-online.target
 After=network-online.target
 

@@ -37,6 +37,19 @@ assert config["status"] == "online"
 assert config["listeners"] == 8
 assert config["bitrate"] == 32
 assert config["streamUrl"] == "http://relay.broadcastify.com/test-mount"
-assert config["source"] == "broadcastify-audio-api-pi-backend"
+assert config["source"] == "broadcastify-embed-player-pi-backend"
+
+embed_html = """
+<audio width="300" id="mePlayer_45951"
+       src="https://listen.broadcastify.com/example-token.mp3"
+       type="audio/mp3" controls="controls">
+</audio>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mediaelement/4.2.9/mediaelement-and-player.min.js"></script>
+"""
+
+assert backend.extract_stream_url_from_embed_html(
+    embed_html,
+    "https://api.broadcastify.com/embed/player/?feedId=45951",
+) == "https://listen.broadcastify.com/example-token.mp3"
 
 print("backend parser tests ok")

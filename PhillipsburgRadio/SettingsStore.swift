@@ -45,7 +45,7 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(stallRecoverySeconds, forKey: Keys.stallRecoverySeconds) }
     }
 
-    @Published private(set) var isAdminUnlocked = false
+    @Published private(set) var isAdminUnlocked = !AppConfig.requiresAdminPassword
 
     private let defaults: UserDefaults
 
@@ -83,6 +83,11 @@ final class SettingsStore: ObservableObject {
     }
 
     func unlockAdmin(password: String) -> Bool {
+        guard AppConfig.requiresAdminPassword else {
+            isAdminUnlocked = true
+            return true
+        }
+
         let expected = defaults.string(forKey: Keys.adminPassword) ?? AppConfig.defaultAdminPassword
         let didUnlock = password == expected
         isAdminUnlocked = didUnlock
@@ -90,7 +95,7 @@ final class SettingsStore: ObservableObject {
     }
 
     func lockAdmin() {
-        isAdminUnlocked = false
+        isAdminUnlocked = !AppConfig.requiresAdminPassword
     }
 
     func changeAdminPassword(to newPassword: String) -> Bool {

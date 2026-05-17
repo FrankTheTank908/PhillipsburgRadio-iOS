@@ -60,3 +60,51 @@ struct TranscriptEvent: Identifiable, Codable {
 struct TranscriptResponse: Codable {
     let events: [TranscriptEvent]
 }
+
+struct IncidentMessage: Identifiable, Codable {
+    let id: UUID
+    let timestamp: String
+    let author: String
+    let text: String
+    let tags: [String]
+    let channel: String?
+
+    init(
+        id: UUID = UUID(),
+        timestamp: String,
+        author: String,
+        text: String,
+        tags: [String] = [],
+        channel: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.author = author
+        self.text = text
+        self.tags = tags
+        self.channel = channel
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case timestamp
+        case author
+        case text
+        case tags
+        case channel
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) ?? "--:--"
+        author = try container.decodeIfPresent(String.self, forKey: .author) ?? "Local Debug"
+        text = try container.decode(String.self, forKey: .text)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        channel = try container.decodeIfPresent(String.self, forKey: .channel)
+    }
+}
+
+struct IncidentResponse: Codable {
+    let messages: [IncidentMessage]
+}

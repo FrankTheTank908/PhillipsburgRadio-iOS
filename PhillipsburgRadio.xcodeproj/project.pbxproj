@@ -18,6 +18,7 @@
 		AA0000030000000000000002 /* AppLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000012 /* AppLogStore.swift */; };
 		AA0000030000000000000003 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000013 /* SettingsView.swift */; };
 		AA0000030000000000000004 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000014 /* TranscriptStore.swift */; };
+		AA0000030000000000000005 /* IncidentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000015 /* IncidentStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 		AA0000030000000000000012 /* AppLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogStore.swift; sourceTree = "<group>"; };
 		AA0000030000000000000013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		AA0000030000000000000014 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
+		AA0000030000000000000015 /* IncidentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +70,7 @@
 				AA0000030000000000000012 /* AppLogStore.swift */,
 				AA0000030000000000000013 /* SettingsView.swift */,
 				AA0000030000000000000014 /* TranscriptStore.swift */,
+				AA0000030000000000000015 /* IncidentStore.swift */,
 				AA0000010000000000000017 /* Info.plist */,
 				AA0000020000000000000011 /* Assets.xcassets */,
 			);
@@ -161,6 +164,7 @@
 				AA0000030000000000000002 /* AppLogStore.swift in Sources */,
 				AA0000030000000000000003 /* SettingsView.swift in Sources */,
 				AA0000030000000000000004 /* TranscriptStore.swift in Sources */,
+				AA0000030000000000000005 /* IncidentStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

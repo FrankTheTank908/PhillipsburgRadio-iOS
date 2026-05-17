@@ -2,7 +2,7 @@
 """
 Phillipsburg Radio local backend server.
 
-Runs on the Raspberry Pi image at http://0.0.0.0:5214 and serves:
+Runs on the Raspberry Pi image at http://0.0.0.0:80 by default and serves:
 - /health
 - /current-feed.json
 - /transcripts
@@ -19,6 +19,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,23 +28,33 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from broadcastify_api_backend import (
-    DEFAULT_API_BASE_URL,
+    DEFAULT_EMBED_PLAYER_URL,
     DEFAULT_ENV_FILES,
     DEFAULT_FEED_ID,
     DEFAULT_OUTPUT_PATH,
     DEFAULT_TTL_SECONDS,
     build_feed_config,
+    embed_player_url_from_env,
     fetch_broadcastify_feed,
     load_first_existing_env_file,
     write_json,
 )
+from radioreference_api import (
+    METHOD_SPECS,
+    RadioReferenceClient,
+    method_catalog,
+    redact_secret_fields,
+)
 
 
 DEFAULT_BIND_HOST = "0.0.0.0"
-DEFAULT_PORT = 5214
+DEFAULT_PORT = 80
 DEFAULT_TRANSCRIPTS_PATH = "/var/lib/phillipsburg-radio/transcripts.jsonl"
+DEFAULT_INCIDENTS_PATH = "/var/lib/phillipsburg-radio/incidents.jsonl"
 DEFAULT_MAX_TRANSCRIPTS = 200
+DEFAULT_MAX_INCIDENTS = 200
 DEFAULT_CACHE_SECONDS = 60
+DEFAULT_PUBLIC_BASE_URL = "http://franksplex.com:5214"
 
 
 class BackendState:
@@ -52,12 +63,16 @@ class BackendState:
         self.loaded_env_file = load_first_existing_env_file(DEFAULT_ENV_FILES)
         self.api_key = required_env("BROADCASTIFY_API_KEY")
         self.feed_id = os.environ.get("BROADCASTIFY_FEED_ID", DEFAULT_FEED_ID).strip()
-        self.api_base_url = os.environ.get("BROADCASTIFY_API_BASE_URL", DEFAULT_API_BASE_URL).strip()
+        self.embed_player_url = embed_player_url_from_env() or DEFAULT_EMBED_PLAYER_URL
         self.output_path = os.environ.get("OUTPUT_JSON_PATH", DEFAULT_OUTPUT_PATH).strip()
         self.transcripts_path = os.environ.get("TRANSCRIPTS_PATH", DEFAULT_TRANSCRIPTS_PATH).strip()
+        self.incidents_path = os.environ.get("INCIDENTS_PATH", DEFAULT_INCIDENTS_PATH).strip()
         self.ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
         self.cache_seconds = int(os.environ.get("CACHE_SECONDS", str(DEFAULT_CACHE_SECONDS)))
+        self.public_base_url = os.environ.get("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL).strip() or DEFAULT_PUBLIC_BASE_URL
         self.admin_token = os.environ.get("BACKEND_ADMIN_TOKEN", "").strip()
+        self.allow_debug_admin_without_token = env_bool("ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN", True)
+        self.radio_reference = RadioReferenceClient.from_env()
         self.last_config: Optional[Dict[str, Any]] = read_json_if_exists(self.output_path)
         self.last_refresh_epoch = 0.0
         self.last_error: Optional[str] = None
@@ -71,7 +86,7 @@ class BackendState:
                 return self.last_config
 
         try:
-            payload = fetch_broadcastify_feed(self.api_base_url, self.api_key, self.feed_id)
+            payload = fetch_broadcastify_feed(self.embed_player_url, self.api_key, self.feed_id)
             config = build_feed_config(payload, self.feed_id, self.ttl_seconds)
             write_json(self.output_path, config)
 
@@ -100,11 +115,49 @@ class BackendState:
                 "feedId": self.feed_id,
                 "port": server_port(),
                 "loadedEnvFile": self.loaded_env_file,
+                "hasDomainKey": bool(self.api_key),
                 "hasApiKey": bool(self.api_key),
+                "hasRadioReferenceAuth": self.radio_reference.has_auth,
+                "debugAdminNoAuth": self.allow_debug_admin_without_token,
                 "lastRefreshEpoch": self.last_refresh_epoch,
                 "lastError": self.last_error,
                 "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
+
+    def metadata(self) -> Dict[str, Any]:
+        catalog = method_catalog()
+        return {
+            "service": "phillipsburg-radio-backend",
+            "publicBaseUrl": self.public_base_url,
+            "localFeedId": self.feed_id,
+            "liveAudioSource": "Broadcastify approved domain-key embed player",
+            "radioReference": {
+                "configured": self.radio_reference.has_auth,
+                "endpoint": self.radio_reference.endpoint,
+                "wsdl": catalog["docs"]["wsdl"],
+                "wiki": catalog["docs"]["wiki"],
+                "methods": catalog["methods"],
+            },
+            "routes": [
+                "/health",
+                "/current-feed.json",
+                "/metadata",
+                "/transcripts",
+                "/incidents",
+                "/radio-reference/methods",
+                "/radio-reference/countries",
+                "/radio-reference/country?coid=1",
+                "/radio-reference/state?stid=34",
+                "/radio-reference/county?ctid=1778",
+                "/radio-reference/zipcode?zipcode=08865",
+                "/radio-reference/user-feeds",
+            ],
+            "notes": [
+                "The iPhone app only talks to this Pi backend.",
+                "RadioReference SOAP is for database metadata and account feed details.",
+                "Broadcastify live audio and AI/ML use are subject to Broadcastify licensing.",
+            ],
+        }
 
     def read_transcripts(self, limit: int = 50) -> List[Dict[str, Any]]:
         path = Path(self.transcripts_path)
@@ -121,6 +174,7 @@ class BackendState:
 
     def add_transcript(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         event = {
+            "id": payload.get("id") or str(uuid.uuid4()),
             "timestamp": payload.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "text": str(payload.get("text") or "").strip(),
             "confidence": payload.get("confidence"),
@@ -138,6 +192,42 @@ class BackendState:
 
         self.log("info", "Transcript event saved")
         return event
+
+    def read_incidents(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return read_jsonl_tail(self.incidents_path, limit)
+
+    def add_incident(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        message = {
+            "id": payload.get("id") or str(uuid.uuid4()),
+            "timestamp": payload.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "author": str(payload.get("author") or "Local Debug").strip(),
+            "text": str(payload.get("text") or "").strip(),
+            "tags": payload.get("tags") if isinstance(payload.get("tags"), list) else [],
+            "channel": payload.get("channel") or "Incident Chat",
+        }
+
+        if not message["text"]:
+            raise ValueError("Incident message text is required")
+
+        path = Path(self.incidents_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(message) + "\n")
+
+        self.log("info", "Incident message saved")
+        return message
+
+    def radio_reference_methods(self) -> Dict[str, Any]:
+        catalog = method_catalog()
+        catalog["configured"] = self.radio_reference.has_auth
+        return catalog
+
+    def call_radio_reference(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        data = self.radio_reference.call_method(method, params)
+        return {
+            "method": method,
+            "data": redact_secret_fields(data),
+        }
 
     def log(self, level: str, message: str) -> None:
         entry = {
@@ -172,10 +262,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json(STATE.get_config(force=force))
                 return
 
+            if parsed.path in {"/metadata", "/radio-reference", "/radioreference"}:
+                self.respond_json(STATE.metadata())
+                return
+
+            if parsed.path.startswith("/radio-reference/") or parsed.path.startswith("/radioreference/"):
+                self.respond_json(self.handle_radio_reference_get(parsed.path, query))
+                return
+
             if parsed.path == "/transcripts":
                 limit = int(query.get("limit", ["50"])[0])
                 limit = max(1, min(limit, DEFAULT_MAX_TRANSCRIPTS))
                 self.respond_json({"events": STATE.read_transcripts(limit=limit)})
+                return
+
+            if parsed.path == "/incidents":
+                limit = int(query.get("limit", ["50"])[0])
+                limit = max(1, min(limit, DEFAULT_MAX_INCIDENTS))
+                self.respond_json({"messages": STATE.read_incidents(limit=limit)})
                 return
 
             if parsed.path == "/events":
@@ -208,6 +312,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_json({"ok": True, "event": event})
                 return
 
+            if parsed.path == "/incidents":
+                if not self.is_admin_authorized():
+                    self.respond_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                    return
+
+                payload = self.read_json_body()
+                message = STATE.add_incident(payload)
+                self.respond_json({"ok": True, "message": message})
+                return
+
             if parsed.path == "/admin/refresh":
                 if not self.is_admin_authorized():
                     self.respond_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
@@ -221,6 +335,42 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:
             STATE.log("error", f"POST failed for {self.path}: {error}")
             self.respond_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def handle_radio_reference_get(self, path: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
+        name = path.strip("/").split("/", 1)[1]
+
+        if name == "methods":
+            return STATE.radio_reference_methods()
+
+        if name == "countries":
+            return STATE.call_radio_reference("getCountryList", {})
+
+        if name == "country":
+            return STATE.call_radio_reference("getCountryInfo", {"coid": query_required_int(query, "coid")})
+
+        if name == "state":
+            return STATE.call_radio_reference("getStateInfo", {"stid": query_required_int(query, "stid")})
+
+        if name == "county":
+            return STATE.call_radio_reference("getCountyInfo", {"ctid": query_required_int(query, "ctid")})
+
+        if name in {"zipcode", "zip"}:
+            return STATE.call_radio_reference("getZipcodeInfo", {"zipcode": query_required_int(query, "zipcode")})
+
+        if name == "user-feeds":
+            return STATE.call_radio_reference("getUserFeedBroadcasts", {})
+
+        if name == "search":
+            return STATE.call_radio_reference(*radio_reference_search_params(query))
+
+        if name == "call":
+            method = query_required(query, "method")
+            if method not in METHOD_SPECS:
+                raise ValueError(f"Unsupported RadioReference method: {method}")
+            params = query_params_for_method(method, query)
+            return STATE.call_radio_reference(method, params)
+
+        raise ValueError(f"Unsupported RadioReference route: {name}")
 
     def respond_sse(self) -> None:
         events = STATE.read_transcripts(limit=25)
@@ -265,6 +415,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def is_admin_authorized(self) -> bool:
         expected = STATE.admin_token
+        if STATE.allow_debug_admin_without_token:
+            return True
         if not expected:
             return False
 
@@ -287,11 +439,68 @@ def read_json_if_exists(path_value: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def read_jsonl_tail(path_value: str, limit: int) -> List[Dict[str, Any]]:
+    path = Path(path_value)
+    if not path.exists():
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
 def required_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         raise RuntimeError(f"{name} is required")
     return value
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def query_required(query: Dict[str, List[str]], name: str) -> str:
+    value = query.get(name, [""])[0].strip()
+    if not value:
+        raise ValueError(f"Missing required query parameter: {name}")
+    return value
+
+
+def query_required_int(query: Dict[str, List[str]], name: str) -> int:
+    return int(query_required(query, name))
+
+
+def radio_reference_search_params(query: Dict[str, List[str]]) -> tuple[str, Dict[str, Any]]:
+    scope = query.get("scope", ["county"])[0].strip().lower()
+    freq = query_required(query, "freq")
+    tone = query.get("tone", [""])[0].strip()
+
+    if scope == "county":
+        return "searchCountyFreq", {"ctid": query_required_int(query, "ctid"), "freq": freq, "tone": tone}
+    if scope == "state":
+        return "searchStateFreq", {"stid": query_required_int(query, "stid"), "freq": freq, "tone": tone}
+    if scope == "metro":
+        return "searchMetroFreq", {"mid": query_required_int(query, "mid"), "freq": freq, "tone": tone}
+
+    raise ValueError("RadioReference search scope must be county, state, or metro")
+
+
+def query_params_for_method(method: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
+    params: Dict[str, Any] = {}
+    for param in METHOD_SPECS[method].params:
+        name = param["name"]
+        if name == "authInfo":
+            continue
+        params[name] = query_required(query, name)
+    return params
 
 
 def server_port() -> int:

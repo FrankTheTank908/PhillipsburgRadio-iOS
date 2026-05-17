@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Broadcastify API backend updater for the Phillipsburg Radio Pi image.
+Broadcastify domain-key backend updater for the Phillipsburg Radio Pi image.
 
-The service reads a config file from the boot partition, calls the official
-Broadcastify Audio API, and writes the latest app JSON locally for the Pi HTTP
+The service reads config from the boot partition, loads the official
+Broadcastify embed player for the approved franksplex.com domain key, extracts
+the current playable audio URL, and writes app JSON locally for the Pi HTTP
 server at http://franksplex.com:5214.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -18,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -28,15 +30,19 @@ DEFAULT_ENV_FILES = [
     "/etc/phillipsburg-radio/backend.env",
 ]
 
-DEFAULT_API_BASE_URL = "https://api.broadcastify.com/audio/"
+DEFAULT_EMBED_PLAYER_URL = "https://api.broadcastify.com/embed/player/"
+DEFAULT_LISTENERS_URL_TEMPLATE = "http://api.broadcastify.com/listeners/feed/{feed_id}"
+DEFAULT_REFERER = "http://Franksplex.com/"
 DEFAULT_FEED_ID = "45951"
+DEFAULT_FEED_TITLE = "Phillipsburg / Easton Public Safety"
+DEFAULT_BITRATE = 32
 DEFAULT_OUTPUT_PATH = "/var/lib/phillipsburg-radio/current-feed.json"
 DEFAULT_TTL_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 20
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Refresh Phillipsburg Radio app JSON from Broadcastify API.")
+    parser = argparse.ArgumentParser(description="Refresh Phillipsburg Radio app JSON from the Broadcastify embed player.")
     parser.add_argument("--env-file", action="append", help="Config file to load. Can be provided more than once.")
     parser.add_argument("--dry-run", action="store_true", help="Print JSON after writing the local config file.")
     args = parser.parse_args()
@@ -46,12 +52,12 @@ def main() -> int:
 
     api_key = required_env("BROADCASTIFY_API_KEY")
     feed_id = os.environ.get("BROADCASTIFY_FEED_ID", DEFAULT_FEED_ID).strip()
-    api_base_url = os.environ.get("BROADCASTIFY_API_BASE_URL", DEFAULT_API_BASE_URL).strip()
+    embed_player_url = embed_player_url_from_env()
     output_path = os.environ.get("OUTPUT_JSON_PATH", DEFAULT_OUTPUT_PATH).strip()
     ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
 
-    api_payload = fetch_broadcastify_feed(api_base_url, api_key, feed_id)
-    config = build_feed_config(api_payload, feed_id, ttl_seconds)
+    feed_payload = fetch_broadcastify_feed(embed_player_url, api_key, feed_id)
+    config = build_feed_config(feed_payload, feed_id, ttl_seconds)
     write_json(output_path, config)
 
     if args.dry_run:
@@ -92,45 +98,166 @@ def required_env(name: str) -> str:
     return value
 
 
-def fetch_broadcastify_feed(api_base_url: str, api_key: str, feed_id: str) -> Dict[str, Any]:
+def embed_player_url_from_env() -> str:
+    configured = os.environ.get("BROADCASTIFY_EMBED_PLAYER_URL", "").strip()
+    if configured:
+        return configured
+
+    legacy = os.environ.get("BROADCASTIFY_API_BASE_URL", "").strip()
+    if "/embed/player" in legacy:
+        return legacy
+
+    return DEFAULT_EMBED_PLAYER_URL
+
+
+def fetch_broadcastify_feed(embed_player_url: str, api_key: str, feed_id: str) -> Dict[str, Any]:
     query = urlencode(
         {
-            "a": "feed",
             "feedId": feed_id,
-            "type": "json",
+            "html5": "1",
+            "as": "1",
+            "stats": "1",
+            "bg": "000000",
+            "fg": "FFFFFF",
             "key": api_key,
         }
     )
-    url = f"{api_base_url}?{query}" if "?" not in api_base_url else f"{api_base_url}&{query}"
+    separator = "&" if "?" in embed_player_url else "?"
+    url = f"{embed_player_url}{separator}{query}"
+
+    player_html = fetch_text(url, embed_headers())
+    stream_url = extract_stream_url_from_embed_html(player_html, url)
+    listeners = fetch_listener_count(feed_id)
+
+    return {
+        "feed": {
+            "feedId": feed_id,
+            "title": DEFAULT_FEED_TITLE,
+            "status": "online",
+            "listeners": listeners,
+            "bitrate": DEFAULT_BITRATE,
+            "streamUrl": stream_url,
+        }
+    }
+
+
+def embed_headers() -> Dict[str, str]:
+    referer = os.environ.get("BROADCASTIFY_REFERER", DEFAULT_REFERER).strip() or DEFAULT_REFERER
+    parsed = urlparse(referer)
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "http://Franksplex.com"
+    return {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Origin": origin,
+        "Referer": referer,
+        "User-Agent": "Mozilla/5.0 PhillipsburgRadioBackend/1.0",
+    }
+
+
+def fetch_text(url: str, headers: Dict[str, str]) -> str:
     request = Request(
         url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "PhillipsburgRadioBackend/1.0",
-        },
+        headers=headers,
     )
 
     try:
         with urlopen(request, timeout=timeout_seconds()) as response:
             body = response.read().decode("utf-8", errors="replace")
             if response.status < 200 or response.status >= 300:
-                raise RuntimeError(f"Broadcastify API returned HTTP {response.status}: {body[:200]}")
+                raise RuntimeError(f"Broadcastify embed player returned HTTP {response.status}: {body[:240]}")
+            return body
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Broadcastify API returned HTTP {error.code}: {detail[:200]}") from error
+        raise RuntimeError(
+            f"Broadcastify embed player returned HTTP {error.code}: {detail[:240]}. "
+            "If this is 403, confirm the key is the domain key for http://Franksplex.com "
+            "and that BROADCASTIFY_REFERER is set to http://Franksplex.com/."
+        ) from error
     except URLError as error:
-        raise RuntimeError(f"Could not call Broadcastify API: {error.reason}") from error
+        raise RuntimeError(f"Could not call Broadcastify embed player: {error.reason}") from error
+
+
+def extract_stream_url_from_embed_html(player_html: str, base_url: str) -> str:
+    normalized = html.unescape(player_html).replace("\\/", "/")
+    candidates = []
+
+    attr_patterns = [
+        r"""<(?:audio|source)\b[^>]*\bsrc=["']([^"']+)["']""",
+        r"""(?:file|src|url)\s*[:=]\s*["']([^"']+)["']""",
+    ]
+    for pattern in attr_patterns:
+        candidates.extend(re.findall(pattern, normalized, flags=re.IGNORECASE))
+
+    candidates.extend(re.findall(r"""https?://[^\s"'<>\\)]+""", normalized, flags=re.IGNORECASE))
+
+    for candidate in candidates:
+        resolved = urljoin(base_url, candidate.strip())
+        if is_probable_audio_url(resolved):
+            return resolved
+
+    raise RuntimeError(
+        "Broadcastify embed player loaded, but no playable audio URL was found in the HTML. "
+        "Open the feed owner Technicals page and confirm the embed-player code for this feed/key."
+    )
+
+
+def is_probable_audio_url(value: str) -> bool:
+    parsed = urlparse(value)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+
+    if not parsed.scheme.startswith("http"):
+        return False
+
+    rejected_extensions = (".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico")
+    if path.endswith(rejected_extensions):
+        return False
+
+    rejected_paths = (
+        "/embed/player",
+        "/feed-status/",
+        "/listeners/feed/",
+        "/listen/feed/",
+    )
+    if any(rejected in path for rejected in rejected_paths):
+        return False
+
+    if path.endswith((".mp3", ".m3u", ".m3u8", ".pls", ".aac")):
+        return True
+
+    return "broadcastify.com" in host and ("listen" in host or "audio" in host)
+
+
+def fetch_listener_count(feed_id: str) -> Optional[int]:
+    template = os.environ.get("BROADCASTIFY_LISTENERS_URL_TEMPLATE", DEFAULT_LISTENERS_URL_TEMPLATE).strip()
+    if not template:
+        return None
+
+    url = template.format(feed_id=feed_id)
+    try:
+        body = fetch_text(
+            url,
+            {
+                "Accept": "text/plain,application/json,*/*",
+                "User-Agent": "PhillipsburgRadioBackend/1.0",
+            },
+        ).strip()
+    except Exception:
+        return None
 
     try:
-        return json.loads(body)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"Broadcastify API did not return JSON: {body[:200]}") from error
+        return int(body)
+    except ValueError:
+        try:
+            data = json.loads(body)
+            return number_or_none(data.get("listeners"))
+        except Exception:
+            return None
 
 
 def build_feed_config(payload: Dict[str, Any], fallback_feed_id: str, ttl_seconds: int) -> Dict[str, Any]:
     feed = find_feed_object(payload)
     if not feed:
-        raise RuntimeError("Broadcastify API response did not include a feed object.")
+        raise RuntimeError("Broadcastify response did not include a feed object.")
 
     stream_url = resolve_stream_url(feed)
     now = datetime.now(timezone.utc)
@@ -144,7 +271,7 @@ def build_feed_config(payload: Dict[str, Any], fallback_feed_id: str, ttl_second
         "streamUrl": stream_url,
         "updatedAt": iso_z(now),
         "expiresAt": iso_z(now + timedelta(seconds=ttl_seconds)),
-        "source": "broadcastify-audio-api-pi-backend",
+        "source": "broadcastify-embed-player-pi-backend",
         "message": None,
     }
 
@@ -195,7 +322,9 @@ def resolve_stream_url(feed: Dict[str, Any]) -> str:
     relay = first_relay(feed)
 
     if not mount or not relay or not relay.get("host"):
-        raise RuntimeError("Broadcastify API response did not include a direct URL or relay/mount fields.")
+        raise RuntimeError(
+            "Broadcastify response did not include a direct stream URL or relay/mount fields."
+        )
 
     if looks_like_url(str(mount)):
         return str(mount)

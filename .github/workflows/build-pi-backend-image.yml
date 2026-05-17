@@ -76,6 +76,9 @@ jobs:
       - name: Prepare backend config
         env:
           BROADCASTIFY_API_KEY: ${{ secrets.BROADCASTIFY_API_KEY }}
+          RADIOREFERENCE_API_KEY: ${{ secrets.RADIOREFERENCE_API_KEY }}
+          RADIOREFERENCE_USERNAME: ${{ secrets.RADIOREFERENCE_USERNAME }}
+          RADIOREFERENCE_PASSWORD: ${{ secrets.RADIOREFERENCE_PASSWORD }}
           BACKEND_ADMIN_TOKEN: ${{ secrets.BACKEND_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
@@ -85,20 +88,38 @@ jobs:
             exit 1
           fi
 
+          RR_API_KEY="${RADIOREFERENCE_API_KEY:-${BROADCASTIFY_API_KEY:-}}"
           ADMIN_TOKEN="${BACKEND_ADMIN_TOKEN:-}"
-          if [ -z "${ADMIN_TOKEN}" ]; then
-            ADMIN_TOKEN="$(openssl rand -hex 32)"
-          fi
+          export RR_API_KEY ADMIN_TOKEN
 
           mkdir -p build/pi-image/config
-          sed \
-            -e "s|^BROADCASTIFY_API_KEY=.*|BROADCASTIFY_API_KEY=${BROADCASTIFY_API_KEY}|" \
-            -e "s|^BACKEND_ADMIN_TOKEN=.*|BACKEND_ADMIN_TOKEN=${ADMIN_TOKEN}|" \
-            -e "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://franksplex.com:5214|" \
-            backend/phillipsburg-radio.env.template \
-            > build/pi-image/config/phillipsburg-radio.env
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-          echo "Prepared backend config for feed 45951 on port 5214."
+          replacements = {
+              "BROADCASTIFY_API_KEY": os.environ["BROADCASTIFY_API_KEY"],
+              "RADIOREFERENCE_API_KEY": os.environ["RR_API_KEY"],
+              "RADIOREFERENCE_USERNAME": os.environ.get("RADIOREFERENCE_USERNAME", ""),
+              "RADIOREFERENCE_PASSWORD": os.environ.get("RADIOREFERENCE_PASSWORD", ""),
+              "BACKEND_ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
+              "ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN": "1",
+              "PUBLIC_BASE_URL": "http://franksplex.com:5214",
+          }
+
+          template_path = Path("backend/phillipsburg-radio.env.template")
+          output_path = Path("build/pi-image/config/phillipsburg-radio.env")
+          lines = []
+          for raw_line in template_path.read_text(encoding="utf-8").splitlines():
+              key = raw_line.split("=", 1)[0] if "=" in raw_line and not raw_line.startswith("#") else ""
+              if key in replacements:
+                  lines.append(f"{key}={replacements[key]}")
+              else:
+                  lines.append(raw_line)
+          output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+          echo "Prepared backend config for feed 45951 on Pi port 80 with public URL http://franksplex.com:5214."
 
       - name: Install backend into Raspberry Pi image
         run: |
@@ -145,6 +166,8 @@ jobs:
             "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/broadcastify_api_backend.py"
           sudo install -m 0755 backend/phillipsburg_radio_server.py \
             "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/phillipsburg_radio_server.py"
+          sudo install -m 0755 backend/radioreference_api.py \
+            "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/radioreference_api.py"
 
           sudo install -m 0644 backend/systemd/phillipsburg-radio-backend.service \
             "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-backend.service"
@@ -207,6 +230,7 @@ jobs:
 
           test -f "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/broadcastify_api_backend.py"
           test -f "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/phillipsburg_radio_server.py"
+          test -f "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/radioreference_api.py"
           test -f "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-server.service"
           test -L "${ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/phillipsburg-radio-server.service"
           test -L "${ROOT_MOUNT}/etc/systemd/system/timers.target.wants/phillipsburg-radio-backend.timer"
@@ -214,6 +238,11 @@ jobs:
 
           if sudo grep -q "BROADCASTIFY_API_KEY=$" "${BOOT_MOUNT}/phillipsburg-radio.env"; then
             echo "Broadcastify API key was not written into image config."
+            exit 1
+          fi
+
+          if ! sudo grep -q "ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN=1" "${BOOT_MOUNT}/phillipsburg-radio.env"; then
+            echo "Personal debug admin mode was not written into image config."
             exit 1
           fi
 
