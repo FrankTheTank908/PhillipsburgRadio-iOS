@@ -2,6 +2,13 @@ name: Build Raspberry Pi backend image
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/build-pi-backend-image.yml"
+      - "backend/**"
+      - "pi-image/**"
 
 jobs:
   build:
