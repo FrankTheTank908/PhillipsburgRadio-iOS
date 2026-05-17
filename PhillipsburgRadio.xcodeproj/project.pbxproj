@@ -13,6 +13,11 @@
 		AA0000010000000000000004 /* FeedURLService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000010000000000000014 /* FeedURLService.swift */; };
 		AA0000010000000000000005 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000010000000000000015 /* Models.swift */; };
 		AA0000010000000000000006 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000010000000000000016 /* AppConfig.swift */; };
+		AA0000020000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000011 /* Assets.xcassets */; };
+		AA0000030000000000000001 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000011 /* SettingsStore.swift */; };
+		AA0000030000000000000002 /* AppLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000012 /* AppLogStore.swift */; };
+		AA0000030000000000000003 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000013 /* SettingsView.swift */; };
+		AA0000030000000000000004 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000014 /* TranscriptStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +29,11 @@
 		AA0000010000000000000015 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		AA0000010000000000000016 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		AA0000010000000000000017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000020000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA0000030000000000000011 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		AA0000030000000000000012 /* AppLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogStore.swift; sourceTree = "<group>"; };
+		AA0000030000000000000013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA0000030000000000000014 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,7 +64,12 @@
 				AA0000010000000000000013 /* RadioPlayer.swift */,
 				AA0000010000000000000014 /* FeedURLService.swift */,
 				AA0000010000000000000015 /* Models.swift */,
+				AA0000030000000000000011 /* SettingsStore.swift */,
+				AA0000030000000000000012 /* AppLogStore.swift */,
+				AA0000030000000000000013 /* SettingsView.swift */,
+				AA0000030000000000000014 /* TranscriptStore.swift */,
 				AA0000010000000000000017 /* Info.plist */,
+				AA0000020000000000000011 /* Assets.xcassets */,
 			);
 			path = PhillipsburgRadio;
 			sourceTree = "<group>";
@@ -125,6 +140,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000020000000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,6 +157,10 @@
 				AA0000010000000000000003 /* RadioPlayer.swift in Sources */,
 				AA0000010000000000000004 /* FeedURLService.swift in Sources */,
 				AA0000010000000000000005 /* Models.swift in Sources */,
+				AA0000030000000000000001 /* SettingsStore.swift in Sources */,
+				AA0000030000000000000002 /* AppLogStore.swift in Sources */,
+				AA0000030000000000000003 /* SettingsView.swift in Sources */,
+				AA0000030000000000000004 /* TranscriptStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-15
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
@@ -20,27 +20,36 @@ jobs:
         run: |
           xcodebuild -version
           xcodebuild -showsdks
+          xcodebuild -list -project PhillipsburgRadio.xcodeproj
 
       - name: Clean build folder
         run: |
+          set -euo pipefail
           rm -rf build
           mkdir -p build/Payload
 
       - name: Build app for iPhoneOS unsigned
         run: |
+          set -euo pipefail
           xcodebuild \
             -project PhillipsburgRadio.xcodeproj \
             -scheme PhillipsburgRadio \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: Package unsigned IPA
         run: |
+          set -euo pipefail
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
 
           if [ -z "$APP_PATH" ]; then
@@ -51,7 +60,13 @@ jobs:
           echo "Found app at: $APP_PATH"
           cp -R "$APP_PATH" build/Payload/
           cd build
-          zip -r PhillipsburgRadio-unsigned.ipa Payload
+          ditto -c -k --keepParent Payload PhillipsburgRadio-unsigned.ipa
+          test -s PhillipsburgRadio-unsigned.ipa
+
+      - name: Show IPA contents
+        run: |
+          set -euo pipefail
+          unzip -l build/PhillipsburgRadio-unsigned.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4

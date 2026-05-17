@@ -4,3 +4,12 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 .swiftpm/
+.env
+*.env
+current-feed.json
+__pycache__/
+cloudflare-worker/wrangler.toml
+pi-gen/
+*.img
+*.img.xz
+*.zip

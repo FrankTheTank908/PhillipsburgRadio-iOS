@@ -1,0 +1,10 @@
+[Unit]
+Description=Phillipsburg Radio Broadcastify URL resolver
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/phillipsburg-radio/PhillipsburgRadio-iOS
+EnvironmentFile=/etc/phillipsburg-radio/resolver.env
+ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/PhillipsburgRadio-iOS/pi/broadcastify_resolver.py --env-file /etc/phillipsburg-radio/resolver.env

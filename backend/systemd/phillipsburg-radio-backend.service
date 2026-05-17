@@ -1,0 +1,11 @@
+[Unit]
+Description=Phillipsburg Radio Broadcastify API backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
+EnvironmentFile=-/boot/phillipsburg-radio.env
+EnvironmentFile=-/etc/phillipsburg-radio/backend.env
+ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/backend/broadcastify_api_backend.py

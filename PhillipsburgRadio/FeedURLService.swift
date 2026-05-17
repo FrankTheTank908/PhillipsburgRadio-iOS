@@ -5,6 +5,7 @@ enum FeedURLError: LocalizedError {
     case invalidConfigURL
     case invalidStreamURL
     case badServerResponse
+    case emptyResponse
 
     var errorDescription: String? {
         switch self {
@@ -16,17 +17,34 @@ enum FeedURLError: LocalizedError {
             return "The stream URL from the config file is invalid."
         case .badServerResponse:
             return "The server returned an invalid response."
+        case .emptyResponse:
+            return "The feed config response was empty."
         }
     }
 }
 
 final class FeedURLService {
-    func fetchCurrentConfig() async throws -> FeedConfig {
-        guard !AppConfig.feedConfigURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    func fetchCurrentConfig(feedConfigURL: String, forceRefresh: Bool = false) async throws -> FeedConfig {
+        guard !feedConfigURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw FeedURLError.missingConfigURL
         }
 
-        guard let url = URL(string: AppConfig.feedConfigURL) else {
+        guard
+            let baseURL = URL(string: feedConfigURL),
+            var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        else {
+            throw FeedURLError.invalidConfigURL
+        }
+
+        if forceRefresh {
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "refresh" || $0.name == "_" }
+            queryItems.append(URLQueryItem(name: "refresh", value: "1"))
+            queryItems.append(URLQueryItem(name: "_", value: String(Int(Date().timeIntervalSince1970))))
+            components.queryItems = queryItems
+        }
+
+        guard let url = components.url else {
             throw FeedURLError.invalidConfigURL
         }
 
@@ -41,13 +59,28 @@ final class FeedURLService {
             throw FeedURLError.badServerResponse
         }
 
-        return try JSONDecoder().decode(FeedConfig.self, from: data)
+        guard !data.isEmpty else {
+            throw FeedURLError.emptyResponse
+        }
+
+        let config = try JSONDecoder().decode(FeedConfig.self, from: data)
+        _ = try validatedStreamURL(from: config)
+
+        return config
     }
 
-    func fetchCurrentStreamURL() async throws -> URL {
-        let config = try await fetchCurrentConfig()
+    func fetchCurrentStreamURL(feedConfigURL: String) async throws -> URL {
+        let config = try await fetchCurrentConfig(feedConfigURL: feedConfigURL)
+        return try validatedStreamURL(from: config)
+    }
 
-        guard let streamURL = URL(string: config.streamUrl) else {
+    private func validatedStreamURL(from config: FeedConfig) throws -> URL {
+        guard
+            let streamURL = URL(string: config.streamUrl),
+            let scheme = streamURL.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            streamURL.host?.isEmpty == false
+        else {
             throw FeedURLError.invalidStreamURL
         }
 

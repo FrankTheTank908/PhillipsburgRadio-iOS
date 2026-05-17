@@ -1,0 +1,99 @@
+name: Build Raspberry Pi backend image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build backend image
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
+          df -h
+
+      - name: Install pi-gen dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            coreutils quilt parted qemu-user-binfmt debootstrap zerofree zip \
+            dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync xz-utils \
+            file git curl bc gpg pigz xxd arch-test bmap-tools kmod
+
+      - name: Fetch pi-gen
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git pi-gen
+
+      - name: Prepare custom pi-gen stage
+        env:
+          BROADCASTIFY_API_KEY: ${{ secrets.BROADCASTIFY_API_KEY }}
+          BACKEND_ADMIN_TOKEN: ${{ secrets.BACKEND_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BROADCASTIFY_API_KEY}" ]; then
+            echo "Missing required GitHub secret: BROADCASTIFY_API_KEY"
+            exit 1
+          fi
+
+          cp pi-image/pi-gen-config pi-gen/config
+          cp -R pi-image/stage-phillipsburg pi-gen/stage-phillipsburg
+          chmod +x pi-gen/stage-phillipsburg/00-install-backend/01-run.sh
+
+          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/backend
+          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/systemd
+          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/boot
+
+          cp backend/broadcastify_api_backend.py \
+            pi-gen/stage-phillipsburg/00-install-backend/files/backend/
+          cp backend/phillipsburg_radio_server.py \
+            pi-gen/stage-phillipsburg/00-install-backend/files/backend/
+          cp backend/systemd/phillipsburg-radio-backend.service \
+            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
+          cp backend/systemd/phillipsburg-radio-backend.timer \
+            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
+          cp backend/systemd/phillipsburg-radio-server.service \
+            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
+
+          ADMIN_TOKEN="${BACKEND_ADMIN_TOKEN:-}"
+          if [ -z "${ADMIN_TOKEN}" ]; then
+            ADMIN_TOKEN="$(openssl rand -hex 32)"
+          fi
+
+          sed \
+            -e "s|^BROADCASTIFY_API_KEY=.*|BROADCASTIFY_API_KEY=${BROADCASTIFY_API_KEY}|" \
+            -e "s|^BACKEND_ADMIN_TOKEN=.*|BACKEND_ADMIN_TOKEN=${ADMIN_TOKEN}|" \
+            -e "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://franksplex.com:5214|" \
+            backend/phillipsburg-radio.env.template \
+            > pi-gen/stage-phillipsburg/00-install-backend/files/boot/phillipsburg-radio.env
+
+          echo "Backend image config prepared for feed 45951 on port 5214."
+
+      - name: Build image
+        working-directory: pi-gen
+        run: |
+          set -euo pipefail
+          sudo CLEAN=1 ./build.sh
+
+      - name: Show deployed files
+        run: |
+          set -euo pipefail
+          find pi-gen/deploy -maxdepth 2 -type f -print -exec ls -lh {} \;
+
+      - name: Upload Raspberry Pi image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phillipsburg-radio-backend-pi-image
+          path: |
+            pi-gen/deploy/*.zip
+            pi-gen/deploy/*.img
+            pi-gen/deploy/*.xz
+          if-no-files-found: error

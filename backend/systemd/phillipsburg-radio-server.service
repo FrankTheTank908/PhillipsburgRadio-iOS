@@ -1,0 +1,17 @@
+[Unit]
+Description=Phillipsburg Radio HTTP backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
+EnvironmentFile=-/boot/phillipsburg-radio.env
+EnvironmentFile=-/etc/phillipsburg-radio/backend.env
+WorkingDirectory=/opt/phillipsburg-radio/backend
+ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/backend/phillipsburg_radio_server.py
+
+[Install]
+WantedBy=multi-user.target
