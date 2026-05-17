@@ -3,8 +3,8 @@
 Broadcastify API backend updater for the Phillipsburg Radio Pi image.
 
 The service reads a config file from the boot partition, calls the official
-Broadcastify Audio API, writes the latest app JSON locally, and optionally
-uploads it to a Cloudflare Worker /update endpoint.
+Broadcastify Audio API, and writes the latest app JSON locally for the Pi HTTP
+server at http://franksplex.com:5214.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ DEFAULT_TIMEOUT_SECONDS = 20
 def main() -> int:
     parser = argparse.ArgumentParser(description="Refresh Phillipsburg Radio app JSON from Broadcastify API.")
     parser.add_argument("--env-file", action="append", help="Config file to load. Can be provided more than once.")
-    parser.add_argument("--dry-run", action="store_true", help="Print JSON and skip upload.")
+    parser.add_argument("--dry-run", action="store_true", help="Print JSON after writing the local config file.")
     args = parser.parse_args()
 
     env_files = args.env_file or DEFAULT_ENV_FILES
@@ -48,8 +48,6 @@ def main() -> int:
     feed_id = os.environ.get("BROADCASTIFY_FEED_ID", DEFAULT_FEED_ID).strip()
     api_base_url = os.environ.get("BROADCASTIFY_API_BASE_URL", DEFAULT_API_BASE_URL).strip()
     output_path = os.environ.get("OUTPUT_JSON_PATH", DEFAULT_OUTPUT_PATH).strip()
-    upload_url = os.environ.get("CONFIG_UPLOAD_URL", "").strip()
-    upload_token = os.environ.get("CONFIG_UPLOAD_TOKEN", "").strip()
     ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
 
     api_payload = fetch_broadcastify_feed(api_base_url, api_key, feed_id)
@@ -60,14 +58,7 @@ def main() -> int:
         print(json.dumps({"loadedEnvFile": loaded_env_file, "config": config}, indent=2))
         return 0
 
-    if upload_url:
-        if not upload_token:
-            raise RuntimeError("CONFIG_UPLOAD_TOKEN is required when CONFIG_UPLOAD_URL is set.")
-        upload_config(upload_url, upload_token, config)
-        print(f"Uploaded current feed config to {upload_url}")
-    else:
-        print(f"Wrote current feed config to {output_path}; CONFIG_UPLOAD_URL not set, so upload was skipped.")
-
+    print(f"Wrote current feed config to {output_path}")
     return 0
 
 
@@ -267,31 +258,6 @@ def write_json(path_value: str, payload: Dict[str, Any]) -> None:
     path = Path(path_value)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def upload_config(upload_url: str, token: str, config: Dict[str, Any]) -> None:
-    payload = json.dumps(config).encode("utf-8")
-    request = Request(
-        upload_url,
-        data=payload,
-        method="POST",
-        headers={
-            "Accept": "application/json",
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": "PhillipsburgRadioBackend/1.0",
-        },
-    )
-
-    try:
-        with urlopen(request, timeout=timeout_seconds()) as response:
-            if response.status < 200 or response.status >= 300:
-                raise RuntimeError(f"Upload returned HTTP {response.status}.")
-    except HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Upload returned HTTP {error.code}: {detail[:200]}") from error
-    except URLError as error:
-        raise RuntimeError(f"Could not upload config: {error.reason}") from error
 
 
 def timeout_seconds() -> int:

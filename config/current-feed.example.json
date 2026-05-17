@@ -7,5 +7,5 @@
   "streamUrl": "http://relay.broadcastify.com/example-mount",
   "updatedAt": "2026-05-11T03:45:00Z",
   "expiresAt": "2026-05-11T03:50:00Z",
-  "source": "broadcastify-audio-api"
+  "source": "broadcastify-audio-api-pi-backend"
 }

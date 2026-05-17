@@ -46,7 +46,7 @@ struct SettingsView: View {
         } header: {
             Text("Feed Config")
         } footer: {
-            Text("This URL should point to your Cloudflare Worker JSON endpoint. The app never needs your Broadcastify API key.")
+            Text("This URL should point to the Pi backend JSON endpoint. The app never needs your Broadcastify API key.")
         }
     }
 
@@ -80,7 +80,7 @@ struct SettingsView: View {
 
     private var privacySection: some View {
         Section {
-            Label("API key stays on Cloudflare or the Pi backend, not in this app.", systemImage: "lock.shield")
+            Label("API key stays on the Pi backend, not in this app.", systemImage: "lock.shield")
             Label("Admin unlock is a local debugging gate, not strong security.", systemImage: "exclamationmark.triangle")
         } header: {
             Text("Security")

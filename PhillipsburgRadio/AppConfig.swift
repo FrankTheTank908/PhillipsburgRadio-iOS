@@ -1,17 +1,16 @@
 import Foundation
 
 enum AppConfig {
-    // Replace this with your hosted JSON URL from Cloudflare, Firebase,
-    // Supabase, or another small config endpoint. Do not put the rotating
-    // Broadcastify .mp3 URL directly in the app.
+    // Pi-only production endpoint. Do not put the Broadcastify API key or a
+    // rotating Broadcastify stream URL directly in the iPhone app.
     //
-    // The URL should return JSON like:
+    // The Pi returns JSON like:
     // {
-    //   "feedId": "phillipsburg_easton_public_safety",
-    //   "streamUrl": "https://example.com/current-feed.mp3",
+    //   "feedId": "45951",
+    //   "streamUrl": "https://relay.broadcastify.com/example",
     //   "updatedAt": "2026-05-10T23:45:00Z",
     //   "expiresAt": "2026-05-10T23:50:00Z",
-    //   "source": "broadcastify-page-resolver"
+    //   "source": "broadcastify-audio-api-pi-backend"
     // }
     static let feedConfigURL = "http://franksplex.com:5214/current-feed.json"
 
