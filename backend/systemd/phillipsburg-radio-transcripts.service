@@ -1,0 +1,19 @@
+[Unit]
+Description=Phillipsburg Radio completed-call transcript pipeline
+Wants=network-online.target
+After=network-online.target phillipsburg-radio-server.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+Environment=DEBIAN_FRONTEND=noninteractive
+EnvironmentFile=-/etc/phillipsburg-radio/backend.env
+EnvironmentFile=-/boot/phillipsburg-radio.env
+EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
+WorkingDirectory=/opt/phillipsburg-radio/backend
+ExecStartPre=/bin/sh -c 'command -v ffmpeg >/dev/null 2>&1 || (apt-get update && apt-get install -y ffmpeg)'
+ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/backend/transcript_pipeline.py
+
+[Install]
+WantedBy=multi-user.target

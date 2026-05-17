@@ -16,7 +16,7 @@ enum AppConfig {
 
     static let appTitle = "Phillipsburg Radio"
     static let feedTitle = "Phillipsburg / Easton Public Safety"
-    static let subtitle = "Broadcastify audio with live transcript support"
+    static let subtitle = "Broadcastify audio with recent incident transcripts"
     static let automaticRetryLimit = 2
     static let stallRecoverySeconds = 12
     // Personal debug build: admin tools are visible without a password.

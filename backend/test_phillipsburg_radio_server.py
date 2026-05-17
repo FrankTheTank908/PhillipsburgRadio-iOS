@@ -11,6 +11,8 @@ os.environ["BACKEND_PORT"] = "5214"
 os.environ["OUTPUT_JSON_PATH"] = str(Path("build/test-current-feed.json").resolve())
 os.environ["TRANSCRIPTS_PATH"] = str(Path("build/test-transcripts.jsonl").resolve())
 os.environ["INCIDENTS_PATH"] = str(Path("build/test-incidents.jsonl").resolve())
+os.environ["INCIDENT_STATE_PATH"] = str(Path("build/test-incident-state.json").resolve())
+os.environ["PIPELINE_STATUS_PATH"] = str(Path("build/test-pipeline-status.json").resolve())
 os.environ["ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN"] = "1"
 
 MODULE_PATH = Path(__file__).with_name("phillipsburg_radio_server.py")
@@ -27,6 +29,17 @@ assert health["debugAdminNoAuth"] is True
 event = server.STATE.add_transcript({"text": "Unit test transcript", "channel": "Test"})
 assert event["text"] == "Unit test transcript"
 assert server.STATE.read_transcripts(limit=1)[0]["text"] == "Unit test transcript"
+
+Path(os.environ["INCIDENT_STATE_PATH"]).write_text(
+    '{"incidents":[{"id":"inc-test","title":"Test Incident","summary":"Unit test summary"}]}',
+    encoding="utf-8",
+)
+Path(os.environ["PIPELINE_STATUS_PATH"]).write_text(
+    '{"ok":true,"state":"transcribed","message":"ok"}',
+    encoding="utf-8",
+)
+assert server.STATE.read_incident_summaries(limit=1)[0]["id"] == "inc-test"
+assert server.STATE.pipeline_status()["state"] == "transcribed"
 
 message = server.STATE.add_incident({"text": "Road closure at the bridge", "author": "Unit Test"})
 assert message["author"] == "Unit Test"

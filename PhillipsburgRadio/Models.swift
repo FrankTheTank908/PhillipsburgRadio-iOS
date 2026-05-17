@@ -16,49 +16,110 @@ struct FeedConfig: Codable {
 struct TranscriptEvent: Identifiable, Codable {
     let id: UUID
     let timestamp: String
+    let startedAt: String?
+    let endedAt: String?
     let text: String
     let confidence: Double?
     let keywords: [String]
     let channel: String?
+    let incidentId: String?
+    let incidentTitle: String?
+    let durationSeconds: Double?
+    let speechSeconds: Double?
+    let source: String?
 
     init(
         id: UUID = UUID(),
         timestamp: String,
+        startedAt: String? = nil,
+        endedAt: String? = nil,
         text: String,
         confidence: Double? = nil,
         keywords: [String] = [],
-        channel: String? = nil
+        channel: String? = nil,
+        incidentId: String? = nil,
+        incidentTitle: String? = nil,
+        durationSeconds: Double? = nil,
+        speechSeconds: Double? = nil,
+        source: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
+        self.startedAt = startedAt
+        self.endedAt = endedAt
         self.text = text
         self.confidence = confidence
         self.keywords = keywords
         self.channel = channel
+        self.incidentId = incidentId
+        self.incidentTitle = incidentTitle
+        self.durationSeconds = durationSeconds
+        self.speechSeconds = speechSeconds
+        self.source = source
     }
 
     enum CodingKeys: String, CodingKey {
         case id
         case timestamp
+        case startedAt
+        case endedAt
         case text
         case confidence
         case keywords
         case channel
+        case incidentId
+        case incidentTitle
+        case durationSeconds
+        case speechSeconds
+        case source
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) ?? "--:--"
+        startedAt = try container.decodeIfPresent(String.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(String.self, forKey: .endedAt)
         text = try container.decode(String.self, forKey: .text)
         confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
         keywords = try container.decodeIfPresent([String].self, forKey: .keywords) ?? []
         channel = try container.decodeIfPresent(String.self, forKey: .channel)
+        incidentId = try container.decodeIfPresent(String.self, forKey: .incidentId)
+        incidentTitle = try container.decodeIfPresent(String.self, forKey: .incidentTitle)
+        durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+        speechSeconds = try container.decodeIfPresent(Double.self, forKey: .speechSeconds)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
     }
 }
 
 struct TranscriptResponse: Codable {
     let events: [TranscriptEvent]
+    let incidents: [IncidentSummary]?
+    let pipeline: TranscriptPipelineStatus?
+}
+
+struct IncidentSummary: Identifiable, Codable {
+    let id: String
+    let createdAt: String?
+    let updatedAt: String?
+    let title: String?
+    let summary: String?
+    let status: String?
+    let keywords: [String]
+    let transcriptCount: Int?
+    let latestText: String?
+    let aiReviewedAt: String?
+    let aiModel: String?
+}
+
+struct TranscriptPipelineStatus: Codable {
+    let ok: Bool?
+    let state: String?
+    let message: String?
+    let updatedAt: String?
+    let hasOpenAIKey: Bool?
+    let transcribeModel: String?
+    let incidentModel: String?
 }
 
 struct IncidentMessage: Identifiable, Codable {

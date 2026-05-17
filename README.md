@@ -17,7 +17,9 @@ Raspberry Pi backend
   -> loads the official Broadcastify embed player for Franksplex.com
   -> calls the RadioReference SOAP database service for metadata
   -> serves the current Broadcastify stream URL to the app
-  -> stores transcript events for the app
+  -> records short completed-call chunks for transcription
+  -> cleans recorded audio with ffmpeg before transcription
+  -> stores transcript events and grouped incidents for the app
   -> stores local incident chat notes for the app
 
 Broadcastify
@@ -40,7 +42,10 @@ There is no serverless backup path in this repo anymore. There is no Broadcastif
 - Do not hard-code the rotating Broadcastify audio stream URL in the iPhone app.
 - The Pi backend owns the Broadcastify embed-player request and returns safe JSON to the app.
 - RadioReference SOAP metadata stays on the Pi backend and is exposed through safe JSON routes.
-- Transcript and incident chat endpoints are local Pi storage. Do not run Broadcastify audio through AI/ML transcription unless your Broadcastify/RadioReference license allows that use.
+- Transcript and incident chat endpoints are local Pi storage.
+- Completed-call transcription uses OpenAI only when `OPENAI_API_KEY` is present in the Pi image config.
+- Do not run Broadcastify audio through AI/ML transcription unless your Broadcastify/RadioReference license allows that use.
+- Live audio cleanup is not proxied through the Pi; cleanup is applied to recorded call chunks so the live player remains direct and low-latency.
 - GitHub Actions builds the unsigned iPhone `.ipa`.
 - GitHub Actions builds the flashable Raspberry Pi `.img.xz`.
 - The old pi-gen image build broke on GitHub because ARM64 `debootstrap` could not execute reliably on the hosted runner.
@@ -106,6 +111,12 @@ RADIOREFERENCE_PASSWORD
 
 If `RADIOREFERENCE_API_KEY` is not set, the Pi image workflow falls back to `BROADCASTIFY_API_KEY` for the RadioReference app key so your existing secret still works.
 
+For completed-call transcripts and incident grouping, add:
+
+```text
+OPENAI_API_KEY
+```
+
 This personal debug build writes `ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN=1`, so local app/admin POST routes do not need a password or token. Set that to `0` and use `BACKEND_ADMIN_TOKEN` before sharing a public build.
 
 The Pi image artifact contains the domain key and any RadioReference secrets because it is preconfigured. Keep the repo private and do not share the Pi image artifact publicly.
@@ -117,7 +128,8 @@ The Pi image artifact contains the domain key and any RadioReference secrets bec
 - Gear settings screen.
 - Admin/debug settings screen unlocked for this personal build.
 - Automatic stream refresh and retry.
-- Transcript polling from the Pi backend.
+- Recent completed-call incident transcripts from the Pi backend.
+- ffmpeg recorded-audio cleanup for past incidents.
 - Incident chat/notes backed by the Pi.
 - Red `POLICE` app icon.
 - Unsigned iOS IPA GitHub Actions workflow.
@@ -125,6 +137,7 @@ The Pi image artifact contains the domain key and any RadioReference secrets bec
 - Python Pi backend server on Pi port `80`, public port `5214`.
 - Official Broadcastify embed-player/domain-key integration.
 - RadioReference SOAP metadata integration.
+- OpenAI transcription integration through `OPENAI_API_KEY`.
 
 ## Repo Layout
 
@@ -164,7 +177,13 @@ RADIOREFERENCE_USERNAME
 RADIOREFERENCE_PASSWORD
 ```
 
-8. Optional: add this secret if you later turn off debug admin mode:
+8. Add this secret for automatic completed-call transcripts:
+
+```text
+OPENAI_API_KEY
+```
+
+9. Optional: add this secret if you later turn off debug admin mode:
 
 ```text
 BACKEND_ADMIN_TOKEN
@@ -287,6 +306,7 @@ Expected `/health` response includes:
   "hasDomainKey": true,
   "hasApiKey": true,
   "hasRadioReferenceAuth": true,
+  "hasOpenAIKey": true,
   "debugAdminNoAuth": true
 }
 ```
@@ -336,6 +356,19 @@ POST /admin/refresh
 GET  /admin/logs
 ```
 
+`GET /transcripts` returns completed scanner events, grouped incident summaries, and the transcript worker status:
+
+```json
+{
+  "events": [],
+  "incidents": [],
+  "pipeline": {
+    "state": "transcribed",
+    "message": "Added transcript to inc-..."
+  }
+}
+```
+
 Admin endpoints require a token only when `ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN=0`:
 
 ```text
@@ -366,6 +399,11 @@ RADIOREFERENCE_PASSWORD=
 RADIOREFERENCE_ENDPOINT=https://api.radioreference.com/soap2/
 RADIOREFERENCE_VERSION=latest
 RADIOREFERENCE_STYLE=rpc
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+OPENAI_INCIDENT_MODEL=gpt-5.5
+ENABLE_OPENAI_INCIDENT_ANALYSIS=1
 BROADCASTIFY_FEED_ID=45951
 BACKEND_BIND_HOST=0.0.0.0
 BACKEND_PORT=80
@@ -375,6 +413,14 @@ ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN=1
 BROADCASTIFY_EMBED_PLAYER_URL=https://api.broadcastify.com/embed/player/
 BROADCASTIFY_REFERER=http://Franksplex.com/
 INCIDENTS_PATH=/var/lib/phillipsburg-radio/incidents.jsonl
+TRANSCRIPTS_PATH=/var/lib/phillipsburg-radio/transcripts.jsonl
+INCIDENT_STATE_PATH=/var/lib/phillipsburg-radio/incident-state.json
+PIPELINE_STATUS_PATH=/var/lib/phillipsburg-radio/transcript-pipeline-status.json
+RECORDINGS_DIR=/var/lib/phillipsburg-radio/recordings
+TRANSCRIPT_CHUNK_SECONDS=25
+TRANSCRIPT_SLEEP_SECONDS=4
+MIN_SPEECH_SECONDS=3
+AUDIO_CLEANUP_FILTER=highpass=f=250,lowpass=f=3600,afftdn=nf=-28,loudnorm=I=-18:TP=-2:LRA=11
 ```
 
 Normally you do not need to edit it because GitHub Actions writes the secrets into the image.
@@ -448,7 +494,7 @@ The app:
 2. Fetches `http://franksplex.com:5214/current-feed.json`.
 3. Reads `streamUrl`.
 4. Plays the Broadcastify audio stream with AVPlayer.
-5. Polls `http://franksplex.com:5214/transcripts`.
+5. Polls `http://franksplex.com:5214/transcripts` for recent completed incidents.
 6. Polls and posts `http://franksplex.com:5214/incidents`.
 7. If playback fails or stalls, calls `current-feed.json?refresh=1`.
 
@@ -501,6 +547,13 @@ If `/health` loads but `/current-feed.json` fails:
 - Rebuild and reflash the Pi image after changing the secret.
 - Or edit `phillipsburg-radio.env` on the SD card boot partition.
 
+If `/transcripts` keeps showing no completed incidents:
+
+- Check `http://franksplex.com:5214/health` and confirm `hasOpenAIKey` is `true`.
+- Confirm the Pi has installed `ffmpeg`; the transcript service installs it automatically on first start.
+- Wait until there is actual scanner traffic. Silent chunks are skipped.
+- Check `transcriptPipeline.message` in `/health` or the `pipeline` object in `/transcripts`.
+
 If the iPhone app launches but does not play:
 
 - Open settings and confirm the feed URL is exactly:
@@ -521,7 +574,6 @@ If the IPA will not install:
 
 ## Later Work
 
-- Add real transcription from the Pi.
 - Add keyword notifications for fire, EMS, MVA, and major incidents.
 - Add a real admin web panel on the Pi.
 - Add a privacy/disclaimer page before App Store submission.

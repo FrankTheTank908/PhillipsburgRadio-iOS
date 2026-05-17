@@ -10,28 +10,6 @@ struct ContentView: View {
     @State private var didAutoStart = false
     @State private var incidentDraft = ""
 
-    private let sampleTranscripts: [TranscriptEvent] = [
-        TranscriptEvent(
-            timestamp: "--:--",
-            text: "Waiting for live transcript events from your Pi backend.",
-            keywords: ["placeholder"],
-            channel: "Dispatch"
-        ),
-        TranscriptEvent(
-            timestamp: "--:--",
-            text: "Audio comes from the current Broadcastify stream URL resolved by the Pi.",
-            keywords: ["audio", "broadcastify"],
-            channel: "Feed"
-        ),
-        TranscriptEvent(
-            timestamp: "--:--",
-            text: "Future rows can include timestamp, text, confidence, keywords, and source channel.",
-            confidence: 0.92,
-            keywords: ["future", "transcript"],
-            channel: "Pi"
-        )
-    ]
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -190,7 +168,11 @@ struct ContentView: View {
     private var transcriptSection: some View {
         panel {
             VStack(alignment: .leading, spacing: 12) {
-                sectionTitle("Live Transcript", systemImage: "text.bubble")
+                sectionTitle("Recent Incidents", systemImage: "text.bubble")
+
+                if let pipeline = transcriptStore.pipelineStatus {
+                    pipelineStatusRow(pipeline)
+                }
 
                 if let error = transcriptStore.lastError, settingsStore.enableTranscriptPolling {
                     Text("Transcript backend not reachable: \(error)")
@@ -198,11 +180,29 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(transcriptRows) { event in
-                    transcriptRow(event)
+                if transcriptStore.incidents.isEmpty && transcriptStore.events.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No completed call transcripts yet.")
+                            .font(.body)
+                        Text(emptyTranscriptHint)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if !transcriptStore.incidents.isEmpty {
+                    ForEach(transcriptStore.incidents) { incident in
+                        incidentTranscriptCard(incident)
 
-                    if event.id != transcriptRows.last?.id {
-                        Divider()
+                        if incident.id != transcriptStore.incidents.last?.id {
+                            Divider()
+                        }
+                    }
+                } else {
+                    ForEach(transcriptStore.events) { event in
+                        transcriptRow(event)
+
+                        if event.id != transcriptStore.events.last?.id {
+                            Divider()
+                        }
                     }
                 }
             }
@@ -264,10 +264,6 @@ struct ContentView: View {
         radioPlayer.isPlaying || radioPlayer.isLoading ? "stop.fill" : "play.fill"
     }
 
-    private var transcriptRows: [TranscriptEvent] {
-        transcriptStore.events.isEmpty ? sampleTranscripts : transcriptStore.events
-    }
-
     private var statusIcon: String {
         if radioPlayer.isPlaying {
             return "checkmark.circle.fill"
@@ -324,6 +320,14 @@ struct ContentView: View {
         }
     }
 
+    private var emptyTranscriptHint: String {
+        if transcriptStore.pipelineStatus?.hasOpenAIKey == false {
+            return "The Pi can record calls, but OPENAI_API_KEY is not configured in the image yet."
+        }
+
+        return "The Pi records finished scanner chunks first, skips silence, then posts the most likely transcript here."
+    }
+
     private func transcriptRow(_ event: TranscriptEvent) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -339,8 +343,8 @@ struct ContentView: View {
 
                 Spacer(minLength: 8)
 
-                if let confidence = event.confidence {
-                    Text("\(Int(confidence * 100))%")
+                if let duration = event.durationSeconds {
+                    Text("\(Int(duration))s")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -357,6 +361,77 @@ struct ContentView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func incidentTranscriptCard(_ incident: IncidentSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(incident.title ?? "Scanner Incident")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(incident.updatedAt ?? "No update time")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                if let count = incident.transcriptCount {
+                    Text("\(count) calls")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let summary = incident.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(events(for: incident).prefix(3)) { event in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.timestamp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(event.text)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+            }
+
+            if !incident.keywords.isEmpty {
+                Text(incident.keywords.prefix(8).joined(separator: " | "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func events(for incident: IncidentSummary) -> [TranscriptEvent] {
+        transcriptStore.events.filter { $0.incidentId == incident.id }
+    }
+
+    private func pipelineStatusRow(_ pipeline: TranscriptPipelineStatus) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: pipeline.ok == false ? "exclamationmark.triangle.fill" : "waveform")
+                .foregroundStyle(pipeline.ok == false ? .orange : .secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pipeline.state ?? "Transcript pipeline")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(pipeline.message ?? "Waiting for completed scanner audio.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func incidentRow(_ message: IncidentMessage) -> some View {

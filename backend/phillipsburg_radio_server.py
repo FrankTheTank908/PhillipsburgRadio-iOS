@@ -51,6 +51,8 @@ DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_PORT = 80
 DEFAULT_TRANSCRIPTS_PATH = "/var/lib/phillipsburg-radio/transcripts.jsonl"
 DEFAULT_INCIDENTS_PATH = "/var/lib/phillipsburg-radio/incidents.jsonl"
+DEFAULT_INCIDENT_STATE_PATH = "/var/lib/phillipsburg-radio/incident-state.json"
+DEFAULT_PIPELINE_STATUS_PATH = "/var/lib/phillipsburg-radio/transcript-pipeline-status.json"
 DEFAULT_MAX_TRANSCRIPTS = 200
 DEFAULT_MAX_INCIDENTS = 200
 DEFAULT_CACHE_SECONDS = 60
@@ -67,6 +69,8 @@ class BackendState:
         self.output_path = os.environ.get("OUTPUT_JSON_PATH", DEFAULT_OUTPUT_PATH).strip()
         self.transcripts_path = os.environ.get("TRANSCRIPTS_PATH", DEFAULT_TRANSCRIPTS_PATH).strip()
         self.incidents_path = os.environ.get("INCIDENTS_PATH", DEFAULT_INCIDENTS_PATH).strip()
+        self.incident_state_path = os.environ.get("INCIDENT_STATE_PATH", DEFAULT_INCIDENT_STATE_PATH).strip()
+        self.pipeline_status_path = os.environ.get("PIPELINE_STATUS_PATH", DEFAULT_PIPELINE_STATUS_PATH).strip()
         self.ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
         self.cache_seconds = int(os.environ.get("CACHE_SECONDS", str(DEFAULT_CACHE_SECONDS)))
         self.public_base_url = os.environ.get("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL).strip() or DEFAULT_PUBLIC_BASE_URL
@@ -118,7 +122,9 @@ class BackendState:
                 "hasDomainKey": bool(self.api_key),
                 "hasApiKey": bool(self.api_key),
                 "hasRadioReferenceAuth": self.radio_reference.has_auth,
+                "hasOpenAIKey": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                 "debugAdminNoAuth": self.allow_debug_admin_without_token,
+                "transcriptPipeline": self.pipeline_status(),
                 "lastRefreshEpoch": self.last_refresh_epoch,
                 "lastError": self.last_error,
                 "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -155,22 +161,25 @@ class BackendState:
             "notes": [
                 "The iPhone app only talks to this Pi backend.",
                 "RadioReference SOAP is for database metadata and account feed details.",
+                "Completed-call transcripts are produced by the Pi transcript pipeline when OPENAI_API_KEY is configured.",
                 "Broadcastify live audio and AI/ML use are subject to Broadcastify licensing.",
             ],
         }
 
     def read_transcripts(self, limit: int = 50) -> List[Dict[str, Any]]:
-        path = Path(self.transcripts_path)
-        if not path.exists():
-            return []
+        return read_jsonl_tail(self.transcripts_path, limit)
 
-        rows: List[Dict[str, Any]] = []
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return rows
+    def read_incident_summaries(self, limit: int = 25) -> List[Dict[str, Any]]:
+        state = read_json_if_exists(self.incident_state_path) or {}
+        incidents = state.get("incidents") if isinstance(state.get("incidents"), list) else []
+        return incidents[:limit]
+
+    def pipeline_status(self) -> Dict[str, Any]:
+        return read_json_if_exists(self.pipeline_status_path) or {
+            "ok": False,
+            "state": "not-started",
+            "message": "Transcript pipeline has not written status yet.",
+        }
 
     def add_transcript(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         event = {
@@ -273,7 +282,15 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/transcripts":
                 limit = int(query.get("limit", ["50"])[0])
                 limit = max(1, min(limit, DEFAULT_MAX_TRANSCRIPTS))
-                self.respond_json({"events": STATE.read_transcripts(limit=limit)})
+                incident_limit = int(query.get("incidentLimit", ["25"])[0])
+                incident_limit = max(1, min(incident_limit, DEFAULT_MAX_INCIDENTS))
+                self.respond_json(
+                    {
+                        "events": STATE.read_transcripts(limit=limit),
+                        "incidents": STATE.read_incident_summaries(limit=incident_limit),
+                        "pipeline": STATE.pipeline_status(),
+                    }
+                )
                 return
 
             if parsed.path == "/incidents":

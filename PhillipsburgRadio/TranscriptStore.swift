@@ -4,6 +4,8 @@ import Combine
 @MainActor
 final class TranscriptStore: ObservableObject {
     @Published private(set) var events: [TranscriptEvent] = []
+    @Published private(set) var incidents: [IncidentSummary] = []
+    @Published private(set) var pipelineStatus: TranscriptPipelineStatus?
     @Published private(set) var lastError: String?
 
     private var pollingTask: Task<Void, Never>?
@@ -54,6 +56,8 @@ final class TranscriptStore: ObservableObject {
 
             let decoded = try JSONDecoder().decode(TranscriptResponse.self, from: data)
             events = decoded.events
+            incidents = decoded.incidents ?? []
+            pipelineStatus = decoded.pipeline
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -69,7 +73,10 @@ final class TranscriptStore: ObservableObject {
         }
 
         components.path = "/transcripts"
-        components.queryItems = [URLQueryItem(name: "limit", value: "50")]
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "75"),
+            URLQueryItem(name: "incidentLimit", value: "25")
+        ]
         return components.url
     }
 }
