@@ -22,9 +22,10 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -44,10 +45,14 @@ DEFAULT_RECORDINGS_DIR = f"{DEFAULT_DATA_DIR}/recordings"
 DEFAULT_TRANSCRIPTS_PATH = f"{DEFAULT_DATA_DIR}/transcripts.jsonl"
 DEFAULT_INCIDENT_STATE_PATH = f"{DEFAULT_DATA_DIR}/incident-state.json"
 DEFAULT_PIPELINE_STATUS_PATH = f"{DEFAULT_DATA_DIR}/transcript-pipeline-status.json"
+DEFAULT_ARCHIVE_STATE_PATH = f"{DEFAULT_DATA_DIR}/archive-state.json"
 DEFAULT_CHUNK_SECONDS = 25
 DEFAULT_SLEEP_SECONDS = 4
 DEFAULT_MIN_SPEECH_SECONDS = 3.0
 DEFAULT_MAX_INCIDENT_AGE_SECONDS = 45 * 60
+DEFAULT_ARCHIVE_LOOKBACK_HOURS = 12
+DEFAULT_ARCHIVE_POLL_SECONDS = 20 * 60
+DEFAULT_OWNER_API_BASE_URL = "https://api.broadcastify.com/owner/"
 DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe"
 DEFAULT_INCIDENT_MODEL = "gpt-5.5"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -119,6 +124,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Record completed scanner chunks and build recent incidents.")
     parser.add_argument("--env-file", action="append", help="Config file to load. Can be provided more than once.")
     parser.add_argument("--once", action="store_true", help="Run one record/transcribe/analyze cycle.")
+    parser.add_argument("--archive-once", action="store_true", help="Run one archive backfill cycle.")
     parser.add_argument("--skip-record", help="Process an existing audio file instead of recording a new chunk.")
     args = parser.parse_args()
 
@@ -127,6 +133,10 @@ def main() -> int:
 
     if args.skip_record:
         pipeline.process_audio_file(Path(args.skip_record), started_at=utc_now(), ended_at=utc_now())
+        return 0
+
+    if args.archive_once:
+        pipeline.process_archives_once()
         return 0
 
     if args.once:
@@ -146,10 +156,13 @@ class PipelineConfig:
     transcripts_path: Path
     incident_state_path: Path
     status_path: Path
+    archive_state_path: Path
     chunk_seconds: int
     sleep_seconds: int
     min_speech_seconds: float
     max_incident_age_seconds: int
+    archive_lookback_hours: int
+    archive_poll_seconds: int
     openai_api_key: str
     openai_base_url: str
     transcribe_model: str
@@ -157,6 +170,9 @@ class PipelineConfig:
     audio_filter: str
     context_prompt: str
     enable_incident_ai: bool
+    broadcastify_username: str
+    broadcastify_password: str
+    owner_api_base_url: str
 
     @classmethod
     def from_env(cls) -> "PipelineConfig":
@@ -168,12 +184,15 @@ class PipelineConfig:
             transcripts_path=Path(os.environ.get("TRANSCRIPTS_PATH", DEFAULT_TRANSCRIPTS_PATH)),
             incident_state_path=Path(os.environ.get("INCIDENT_STATE_PATH", DEFAULT_INCIDENT_STATE_PATH)),
             status_path=Path(os.environ.get("PIPELINE_STATUS_PATH", DEFAULT_PIPELINE_STATUS_PATH)),
+            archive_state_path=Path(os.environ.get("ARCHIVE_STATE_PATH", DEFAULT_ARCHIVE_STATE_PATH)),
             chunk_seconds=int(os.environ.get("TRANSCRIPT_CHUNK_SECONDS", str(DEFAULT_CHUNK_SECONDS))),
             sleep_seconds=int(os.environ.get("TRANSCRIPT_SLEEP_SECONDS", str(DEFAULT_SLEEP_SECONDS))),
             min_speech_seconds=float(os.environ.get("MIN_SPEECH_SECONDS", str(DEFAULT_MIN_SPEECH_SECONDS))),
             max_incident_age_seconds=int(
                 os.environ.get("MAX_INCIDENT_AGE_SECONDS", str(DEFAULT_MAX_INCIDENT_AGE_SECONDS))
             ),
+            archive_lookback_hours=int(os.environ.get("ARCHIVE_LOOKBACK_HOURS", str(DEFAULT_ARCHIVE_LOOKBACK_HOURS))),
+            archive_poll_seconds=int(os.environ.get("ARCHIVE_POLL_SECONDS", str(DEFAULT_ARCHIVE_POLL_SECONDS))),
             openai_api_key=os.environ.get("OPENAI_API_KEY", "").strip(),
             openai_base_url=os.environ.get("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).rstrip("/"),
             transcribe_model=os.environ.get("OPENAI_TRANSCRIBE_MODEL", DEFAULT_TRANSCRIBE_MODEL).strip()
@@ -184,6 +203,16 @@ class PipelineConfig:
             context_prompt=os.environ.get("TRANSCRIPTION_CONTEXT_PROMPT", DEFAULT_CONTEXT_PROMPT).strip()
             or DEFAULT_CONTEXT_PROMPT,
             enable_incident_ai=env_bool("ENABLE_OPENAI_INCIDENT_ANALYSIS", True),
+            broadcastify_username=(
+                os.environ.get("BROADCASTIFY_USERNAME", "").strip()
+                or os.environ.get("RADIOREFERENCE_USERNAME", "").strip()
+            ),
+            broadcastify_password=(
+                os.environ.get("BROADCASTIFY_PASSWORD", "").strip()
+                or os.environ.get("RADIOREFERENCE_PASSWORD", "").strip()
+            ),
+            owner_api_base_url=os.environ.get("BROADCASTIFY_OWNER_API_BASE_URL", DEFAULT_OWNER_API_BASE_URL).strip()
+            or DEFAULT_OWNER_API_BASE_URL,
         )
 
 
@@ -193,12 +222,17 @@ class TranscriptPipeline:
         self.config.recordings_dir.mkdir(parents=True, exist_ok=True)
         self.config.transcripts_path.parent.mkdir(parents=True, exist_ok=True)
         self.config.incident_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config.archive_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.last_archive_poll = 0.0
 
     def run_forever(self) -> None:
         self.write_status("starting", "Transcript pipeline started")
         while True:
             try:
                 self.run_once()
+                if time.time() - self.last_archive_poll >= self.config.archive_poll_seconds:
+                    self.process_archives_once()
+                    self.last_archive_poll = time.time()
             except Exception as error:
                 self.write_status("error", str(error))
             time.sleep(self.config.sleep_seconds)
@@ -215,12 +249,119 @@ class TranscriptPipeline:
         ended_at = utc_now()
         return self.process_audio_file(cleaned_path, started_at, ended_at, raw_path=raw_path)
 
+    def process_archives_once(self) -> List[Dict[str, Any]]:
+        if not self.config.openai_api_key:
+            self.write_status("waiting", "OPENAI_API_KEY is not configured; archive transcripts are paused.")
+            return []
+
+        if not self.config.broadcastify_username or not self.config.broadcastify_password:
+            self.write_status(
+                "waiting",
+                "Broadcastify owner username/password are not configured; archive backfill is paused.",
+            )
+            return []
+
+        archive_state = load_archive_state(self.config.archive_state_path)
+        processed_ids = set(archive_state.get("processedArchiveIds") or [])
+        archives = self.fetch_recent_archives()
+        processed: List[Dict[str, Any]] = []
+
+        for archive in archives:
+            archive_id = archive_identity(archive)
+            if archive_id in processed_ids:
+                continue
+
+            download_url = archive.get("downloadUrl")
+            if not download_url:
+                processed_ids.add(archive_id)
+                continue
+
+            started_at = parse_iso(archive.get("startedAt")) or utc_now()
+            ended_at = parse_iso(archive.get("endedAt")) or started_at
+            audio_path = self.download_archive_audio(download_url, archive_id)
+            cleaned_path = self.clean_audio(audio_path)
+            try:
+                event = self.process_audio_file(
+                    cleaned_path,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    raw_path=audio_path,
+                    extra_fields={"archiveId": archive_id, "sourceArchive": archive},
+                )
+            except Exception as error:
+                self.write_status("warning", f"Archive {archive_id} failed: {error}")
+                continue
+
+            processed_ids.add(archive_id)
+            if event:
+                processed.append(event)
+
+        archive_state["processedArchiveIds"] = sorted(processed_ids)[-1000:]
+        archive_state["updatedAt"] = iso_z(utc_now())
+        save_json(self.config.archive_state_path, archive_state)
+
+        if processed:
+            self.write_status("archive-backfill", f"Processed {len(processed)} archive transcript(s)")
+        else:
+            self.write_status("archive-backfill", "No new archive audio to process")
+
+        return processed
+
+    def fetch_recent_archives(self) -> List[Dict[str, Any]]:
+        dates = archive_dates_for_lookback(self.config.archive_lookback_hours)
+        archives: List[Dict[str, Any]] = []
+        for day in dates:
+            payload = self.fetch_archive_day(day)
+            archives.extend(normalize_archive_listing(payload, day))
+        return sorted(archives, key=lambda item: item.get("startedAt") or "")
+
+    def fetch_archive_day(self, day: str) -> Any:
+        query = urlencode(
+            {
+                "a": "archives",
+                "feedId": self.config.feed_id,
+                "day": day,
+                "type": "json",
+                "u": self.config.broadcastify_username,
+                "p": self.config.broadcastify_password,
+            }
+        )
+        separator = "&" if "?" in self.config.owner_api_base_url else "?"
+        request = Request(
+            f"{self.config.owner_api_base_url}{separator}{query}",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "PhillipsburgRadioBackend/1.0",
+            },
+        )
+        return read_json_request(request, timeout=45)
+
+    def download_archive_audio(self, url: str, archive_id: str) -> Path:
+        safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "-", archive_id).strip("-")
+        path = self.config.recordings_dir / f"archive-{safe_id}.mp3"
+        if path.exists() and path.stat().st_size > 0:
+            return path
+
+        request = Request(url, headers={"User-Agent": "PhillipsburgRadioBackend/1.0"})
+        try:
+            with urlopen(request, timeout=120) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError(f"Archive download returned HTTP {response.status}")
+                path.write_bytes(response.read())
+                return path
+        except HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Archive download returned HTTP {error.code}: {detail[:240]}") from error
+        except URLError as error:
+            raise RuntimeError(f"Archive download failed: {error.reason}") from error
+
     def process_audio_file(
         self,
         audio_path: Path,
         started_at: datetime,
         ended_at: datetime,
         raw_path: Optional[Path] = None,
+        extra_fields: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         duration = audio_duration_seconds(audio_path)
         speech_seconds = estimate_speech_seconds(audio_path, duration)
@@ -260,6 +401,8 @@ class TranscriptPipeline:
             "source": transcription.get("source"),
             "status": "transcribed",
         }
+        if extra_fields:
+            event.update(extra_fields)
 
         append_jsonl(self.config.transcripts_path, event)
         update_incident_with_event(incident_state, incident, event)
@@ -403,6 +546,7 @@ class TranscriptPipeline:
             "transcribeModel": self.config.transcribe_model,
             "incidentModel": self.config.incident_model,
             "recordingsDir": str(self.config.recordings_dir),
+            "hasArchiveAuth": bool(self.config.broadcastify_username and self.config.broadcastify_password),
         }
         if extra:
             payload.update(extra)
@@ -511,6 +655,127 @@ def read_json_request(request: Request, timeout: int) -> Dict[str, Any]:
         raise RuntimeError(f"HTTP {error.code}: {detail[:300]}") from error
     except URLError as error:
         raise RuntimeError(f"Network error: {error.reason}") from error
+
+
+def normalize_archive_listing(payload: Any, day: str) -> List[Dict[str, Any]]:
+    rows = archive_rows_from_payload(payload)
+    archives = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        download_url = first_value(
+            row,
+            [
+                "downloadUrl",
+                "downloadURL",
+                "download_url",
+                "download",
+                "url",
+                "file",
+                "mp3",
+            ],
+        )
+        started_at = archive_time_value(row, ["startTime", "start", "start_time", "from", "time", "datetime"], day)
+        ended_at = archive_time_value(row, ["endTime", "end", "end_time", "to", "until"], day)
+        label = first_value(row, ["timeframe", "timeFrame", "label", "name", "descr", "description"])
+
+        if not download_url and isinstance(label, str) and "http" in label:
+            match = re.search(r"https?://\S+", label)
+            download_url = match.group(0).rstrip(".,") if match else None
+
+        archives.append(
+            {
+                "id": str(first_value(row, ["id", "archiveId", "archive_id"]) or ""),
+                "day": day,
+                "label": str(label or ""),
+                "startedAt": started_at,
+                "endedAt": ended_at,
+                "downloadUrl": str(download_url or ""),
+                "raw": row,
+            }
+        )
+    return [archive for archive in archives if archive.get("downloadUrl")]
+
+
+def archive_rows_from_payload(payload: Any) -> List[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+
+    for key in [
+        "archives",
+        "archive",
+        "Archives",
+        "Archive",
+        "data",
+        "results",
+        "feeds",
+    ]:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            nested = archive_rows_from_payload(value)
+            if nested:
+                return nested
+
+    return [payload] if any(key.lower().endswith("url") or key in {"url", "download", "file"} for key in payload) else []
+
+
+def archive_time_value(row: Dict[str, Any], keys: Sequence[str], day: str) -> Optional[str]:
+    value = first_value(row, keys)
+    if value is None:
+        label = str(first_value(row, ["timeframe", "timeFrame", "label", "name"]) or "")
+        match = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", label)
+        if match:
+            return archive_time_value({"time": match.group(1)}, ["time"], day)
+        return None
+
+    text = str(value).strip()
+    parsed = parse_iso(text)
+    if parsed:
+        return iso_z(parsed)
+
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%H:%M:%S", "%H:%M"]:
+        try:
+            if fmt.startswith("%Y"):
+                dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            else:
+                hour = datetime.strptime(text, fmt).time()
+                date = datetime.strptime(day, "%Y-%m-%d").date()
+                dt = datetime.combine(date, hour, tzinfo=timezone.utc)
+            return iso_z(dt)
+        except ValueError:
+            continue
+
+    return None
+
+
+def first_value(mapping: Dict[str, Any], keys: Sequence[str]) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+
+def archive_dates_for_lookback(hours: int) -> List[str]:
+    now = utc_now()
+    start = now - timedelta(hours=max(1, hours))
+    dates = {start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")}
+    return sorted(dates)
+
+
+def archive_identity(archive: Dict[str, Any]) -> str:
+    if archive.get("id"):
+        return str(archive["id"])
+    raw = "|".join(
+        str(archive.get(key) or "")
+        for key in ["day", "startedAt", "endedAt", "downloadUrl", "label"]
+    )
+    return uuid.uuid5(uuid.NAMESPACE_URL, raw).hex
 
 
 def transcript_text_from_openai_response(response: Dict[str, Any]) -> str:
@@ -771,8 +1036,24 @@ def load_incident_state(path: Path) -> Dict[str, Any]:
 
 
 def save_incident_state(path: Path, state: Dict[str, Any]) -> None:
+    save_json(path, state)
+
+
+def load_archive_state(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {"processedArchiveIds": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("processedArchiveIds"), list):
+            return data
+    except Exception:
+        pass
+    return {"processedArchiveIds": []}
+
+
+def save_json(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:

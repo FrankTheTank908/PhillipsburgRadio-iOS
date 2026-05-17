@@ -44,6 +44,7 @@ There is no serverless backup path in this repo anymore. There is no Broadcastif
 - RadioReference SOAP metadata stays on the Pi backend and is exposed through safe JSON routes.
 - Transcript and incident chat endpoints are local Pi storage.
 - Completed-call transcription uses OpenAI only when `OPENAI_API_KEY` is present in the Pi image config.
+- Archive backfill uses Broadcastify's feed-owner archive API only when `BROADCASTIFY_USERNAME` and `BROADCASTIFY_PASSWORD` are present.
 - Do not run Broadcastify audio through AI/ML transcription unless your Broadcastify/RadioReference license allows that use.
 - Live audio cleanup is not proxied through the Pi; cleanup is applied to recorded call chunks so the live player remains direct and low-latency.
 - GitHub Actions builds the unsigned iPhone `.ipa`.
@@ -94,6 +95,13 @@ BROADCASTIFY_API_KEY
 ```
 
 The secret keeps the old name so the workflow does not need a new secret, but the value is your approved `Franksplex.com` domain key.
+
+For Broadcastify archive backfill, add these feed-owner credentials if you want the Pi to pull past archive MP3 blocks:
+
+```text
+BROADCASTIFY_USERNAME
+BROADCASTIFY_PASSWORD
+```
 
 The backend admin token belongs in the GitHub repository secret named:
 
@@ -177,13 +185,20 @@ RADIOREFERENCE_USERNAME
 RADIOREFERENCE_PASSWORD
 ```
 
-8. Add this secret for automatic completed-call transcripts:
+8. Optional: add Broadcastify feed-owner credentials for archive backfill:
+
+```text
+BROADCASTIFY_USERNAME
+BROADCASTIFY_PASSWORD
+```
+
+9. Add this secret for automatic completed-call transcripts:
 
 ```text
 OPENAI_API_KEY
 ```
 
-9. Optional: add this secret if you later turn off debug admin mode:
+10. Optional: add this secret if you later turn off debug admin mode:
 
 ```text
 BACKEND_ADMIN_TOKEN
@@ -396,6 +411,8 @@ BROADCASTIFY_API_KEY=
 RADIOREFERENCE_API_KEY=
 RADIOREFERENCE_USERNAME=
 RADIOREFERENCE_PASSWORD=
+BROADCASTIFY_USERNAME=
+BROADCASTIFY_PASSWORD=
 RADIOREFERENCE_ENDPOINT=https://api.radioreference.com/soap2/
 RADIOREFERENCE_VERSION=latest
 RADIOREFERENCE_STYLE=rpc
@@ -416,10 +433,14 @@ INCIDENTS_PATH=/var/lib/phillipsburg-radio/incidents.jsonl
 TRANSCRIPTS_PATH=/var/lib/phillipsburg-radio/transcripts.jsonl
 INCIDENT_STATE_PATH=/var/lib/phillipsburg-radio/incident-state.json
 PIPELINE_STATUS_PATH=/var/lib/phillipsburg-radio/transcript-pipeline-status.json
+ARCHIVE_STATE_PATH=/var/lib/phillipsburg-radio/archive-state.json
 RECORDINGS_DIR=/var/lib/phillipsburg-radio/recordings
 TRANSCRIPT_CHUNK_SECONDS=25
 TRANSCRIPT_SLEEP_SECONDS=4
 MIN_SPEECH_SECONDS=3
+ARCHIVE_LOOKBACK_HOURS=12
+ARCHIVE_POLL_SECONDS=1200
+BROADCASTIFY_OWNER_API_BASE_URL=https://api.broadcastify.com/owner/
 AUDIO_CLEANUP_FILTER=highpass=f=250,lowpass=f=3600,afftdn=nf=-28,loudnorm=I=-18:TP=-2:LRA=11
 ```
 
@@ -553,6 +574,7 @@ If `/transcripts` keeps showing no completed incidents:
 - Confirm the Pi has installed `ffmpeg`; the transcript service installs it automatically on first start.
 - Wait until there is actual scanner traffic. Silent chunks are skipped.
 - Check `transcriptPipeline.message` in `/health` or the `pipeline` object in `/transcripts`.
+- For archive backfill, add `BROADCASTIFY_USERNAME` and `BROADCASTIFY_PASSWORD`, rebuild/reflash, and check that `transcriptPipeline.hasArchiveAuth` is `true`.
 
 If the iPhone app launches but does not play:
 

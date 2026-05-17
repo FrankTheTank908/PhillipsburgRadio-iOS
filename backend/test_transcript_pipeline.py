@@ -57,6 +57,22 @@ assert incident_c["id"] != incident_a["id"]
 assert "accident" in pipeline.extract_keywords("motor vehicle accident")
 assert pipeline.normalize_transcript_text("  Test   transcript\n") == "Test transcript"
 
+archive_payload = {
+    "archives": [
+        {
+            "timeframe": "13:00 - 13:30",
+            "downloadUrl": "https://archives.broadcastify.com/example.mp3",
+        }
+    ]
+}
+archives = pipeline.normalize_archive_listing(archive_payload, "2026-05-17")
+assert archives[0]["downloadUrl"].endswith("example.mp3")
+assert archives[0]["startedAt"].startswith("2026-05-17T13:00")
+assert pipeline.archive_identity(archives[0])
+
+dates = pipeline.archive_dates_for_lookback(48)
+assert len(dates) >= 2
+
 state_path = Path("build/test-transcript-pipeline-state.json")
 pipeline.save_incident_state(state_path, state)
 loaded = pipeline.load_incident_state(state_path)
