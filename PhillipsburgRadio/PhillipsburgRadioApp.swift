@@ -1,10 +1,15 @@
 import SwiftUI
 import AVFoundation
 
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
+
 @main
 struct PhillipsburgRadioApp: App {
     init() {
         configureAudioSession()
+        configureMobileAds()
     }
 
     var body: some Scene {
@@ -20,5 +25,11 @@ struct PhillipsburgRadioApp: App {
         } catch {
             print("Audio session setup failed: \(error.localizedDescription)")
         }
+    }
+
+    private func configureMobileAds() {
+#if canImport(GoogleMobileAds)
+        MobileAds.shared.start()
+#endif
     }
 }

@@ -14,7 +14,7 @@ The iPhone app never stores Broadcastify, RadioReference, OpenAI, or backend URL
 - Pi-only backend URL configured privately at build time.
 - Broadcastify catalog and domain-key stream resolution kept off-device.
 - StoreKit subscription foundation with Pi entitlement verification endpoint.
-- Rewarded-ad play session endpoint ready for Google AdMob SSV integration.
+- Google Mobile Ads rewarded-ad gate with Pi play-session endpoint.
 - Completed-call transcription pipeline for recent scanner traffic.
 - ffmpeg audio cleanup for recorded/archive chunks before transcription.
 - Broadcastify feed-owner archive backfill for missed or past traffic.
@@ -193,6 +193,7 @@ PhillipsburgRadio/
   IncidentStore.swift
   MonetizationStore.swift
   RadioPlayer.swift
+  RewardedAdStore.swift
   ScannerCatalogStore.swift
   SettingsView.swift
   TranscriptStore.swift
@@ -243,6 +244,8 @@ Broadcastify and RadioReference credentials stay on the Pi backend and in GitHub
 Broadcastify catalog access requires an approved application key. Broadcastify's current public API page says the catalog API is only available to approved licensees and that additional mobile developer licenses are not currently being issued. This project therefore keeps API access server-side and should only be used with explicit approval for the intended product.
 
 StoreKit purchase checks must be server-side before a public freemium release. The app sends StoreKit `jwsRepresentation` values to the Pi, but production access should only be granted after signature validation with Apple-supported server tooling and subscription status checks. Rewarded ads should use Google AdMob server-side verification callbacks before ad-based play sessions become production entitlements.
+
+The iOS project links the official Google Mobile Ads Swift Package. The app injects `GADApplicationIdentifier` and the rewarded ad unit ID from GitHub Secrets, preloads a rewarded ad, and sends a per-device custom reward token through AdMob SSV data. The Pi currently has a debug rewarded-play bypass for personal builds; set `ALLOW_DEBUG_AD_ACCESS=0` before public testing.
 
 ## Project Status
 

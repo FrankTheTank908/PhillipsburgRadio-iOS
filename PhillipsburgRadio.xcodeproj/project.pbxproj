@@ -21,6 +21,8 @@
 		AA0000030000000000000005 /* IncidentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000030000000000000015 /* IncidentStore.swift */; };
 		AA0000040000000000000001 /* ScannerCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000011 /* ScannerCatalogStore.swift */; };
 		AA0000040000000000000002 /* MonetizationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000012 /* MonetizationStore.swift */; };
+		AA0000040000000000000003 /* RewardedAdStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000013 /* RewardedAdStore.swift */; };
+		AA0000050000000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000050000000000000011 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +42,7 @@
 		AA0000030000000000000015 /* IncidentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentStore.swift; sourceTree = "<group>"; };
 		AA0000040000000000000011 /* ScannerCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerCatalogStore.swift; sourceTree = "<group>"; };
 		AA0000040000000000000012 /* MonetizationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonetizationStore.swift; sourceTree = "<group>"; };
+		AA0000040000000000000013 /* RewardedAdStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardedAdStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -47,6 +50,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000050000000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +81,7 @@
 				AA0000030000000000000015 /* IncidentStore.swift */,
 				AA0000040000000000000011 /* ScannerCatalogStore.swift */,
 				AA0000040000000000000012 /* MonetizationStore.swift */,
+				AA0000040000000000000013 /* RewardedAdStore.swift */,
 				AA0000010000000000000017 /* Info.plist */,
 				AA0000020000000000000011 /* Assets.xcassets */,
 			);
@@ -107,6 +112,9 @@
 			dependencies = (
 			);
 			name = PhillipsburgRadio;
+			packageProductDependencies = (
+				AA0000050000000000000011 /* GoogleMobileAds */,
+			);
 			productName = PhillipsburgRadio;
 			productReference = AA0000010000000000000010 /* PhillipsburgRadio.app */;
 			productType = "com.apple.product-type.application";
@@ -137,6 +145,9 @@
 			mainGroup = AA0000010000000000000030;
 			productRefGroup = AA0000010000000000000032 /* Products */;
 			projectDirPath = "";
+			packageReferences = (
+				AA0000050000000000000020 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			projectRoot = "";
 			targets = (
 				AA0000010000000000000040 /* PhillipsburgRadio */,
@@ -173,10 +184,30 @@
 				AA0000030000000000000005 /* IncidentStore.swift in Sources */,
 				AA0000040000000000000001 /* ScannerCatalogStore.swift in Sources */,
 				AA0000040000000000000002 /* MonetizationStore.swift in Sources */,
+				AA0000040000000000000003 /* RewardedAdStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA0000050000000000000020 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0000050000000000000011 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000050000000000000020 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000010000000000000090 /* Debug */ = {
@@ -308,6 +339,10 @@
 				INFOPLIST_FILE = PhillipsburgRadio/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.frankpinheiro.phillipsburgradio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -329,6 +364,10 @@
 				INFOPLIST_FILE = PhillipsburgRadio/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.frankpinheiro.phillipsburgradio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

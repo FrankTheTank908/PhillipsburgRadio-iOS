@@ -8,6 +8,7 @@ struct ContentView: View {
     @StateObject private var incidentStore = IncidentStore()
     @StateObject private var catalogStore = ScannerCatalogStore()
     @StateObject private var monetizationStore = MonetizationStore()
+    @StateObject private var rewardedAdStore = RewardedAdStore()
     @State private var isShowingSettings = false
     @State private var isShowingAccessGate = false
     @State private var didAutoStart = false
@@ -61,6 +62,10 @@ struct ContentView: View {
                 Task {
                     await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
                     await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                    await rewardedAdStore.preload(
+                        adUnitID: AppConfig.adMobRewardedAdUnitID,
+                        customData: rewardCustomData
+                    )
                 }
 
                 guard settingsStore.autoPlayOnLaunch, !didAutoStart else {
@@ -83,6 +88,10 @@ struct ContentView: View {
                 Task {
                     await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
                     await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                    await rewardedAdStore.preload(
+                        adUnitID: AppConfig.adMobRewardedAdUnitID,
+                        customData: rewardCustomData
+                    )
                 }
             }
             .onChange(of: settingsStore.enableTranscriptPolling) { _ in
@@ -520,6 +529,15 @@ struct ContentView: View {
 
                 Button {
                     Task {
+                        let watchedAd = await rewardedAdStore.show(
+                            adUnitID: AppConfig.adMobRewardedAdUnitID,
+                            customData: rewardCustomData
+                        )
+                        let canUseDebugFallback = AppConfig.adMobRewardedAdUnitID.isEmpty
+                        guard watchedAd || canUseDebugFallback else {
+                            return
+                        }
+
                         let granted = await monetizationStore.requestRewardedPlay(
                             feedConfigURL: settingsStore.trimmedFeedConfigURL,
                             feedId: selectedFeed?.resolvedFeedId
@@ -557,7 +575,7 @@ struct ContentView: View {
                     ProgressView()
                 }
 
-                if let error = monetizationStore.lastError {
+                if let error = rewardedAdStore.lastError ?? monetizationStore.lastError {
                     Text(error)
                         .font(.footnote)
                         .foregroundStyle(.red)
@@ -748,6 +766,13 @@ struct ContentView: View {
 
     private func startPlaybackForSelectedFeed() async {
         await radioPlayer.start(using: settingsStore.playerSettings, feed: selectedFeed)
+    }
+
+    private var rewardCustomData: String {
+        [
+            monetizationStore.appAccountToken.uuidString,
+            selectedFeed?.resolvedFeedId ?? AppConfig.feedTitle
+        ].joined(separator: "|")
     }
 }
 
