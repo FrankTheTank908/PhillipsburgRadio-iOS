@@ -56,7 +56,7 @@ DEFAULT_PIPELINE_STATUS_PATH = "/var/lib/phillipsburg-radio/transcript-pipeline-
 DEFAULT_MAX_TRANSCRIPTS = 200
 DEFAULT_MAX_INCIDENTS = 200
 DEFAULT_CACHE_SECONDS = 60
-DEFAULT_PUBLIC_BASE_URL = "http://franksplex.com:5214"
+DEFAULT_PUBLIC_BASE_URL = "http://example.invalid"
 
 
 class BackendState:

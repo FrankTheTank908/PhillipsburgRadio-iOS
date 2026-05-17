@@ -12,7 +12,10 @@ enum AppConfig {
     //   "expiresAt": "2026-05-10T23:50:00Z",
     //   "source": "broadcastify-embed-player-pi-backend"
     // }
-    static let feedConfigURL = "http://franksplex.com:5214/current-feed.json"
+    static let feedConfigURL = Bundle.main.stringValue(
+        forInfoDictionaryKey: "FeedConfigURL",
+        fallback: "http://example.invalid/current-feed.json"
+    )
 
     static let appTitle = "Phillipsburg Radio"
     static let feedTitle = "Phillipsburg / Easton Public Safety"
@@ -23,4 +26,15 @@ enum AppConfig {
     // Set this to true before sharing a Release build outside your own devices.
     static let requiresAdminPassword = false
     static let defaultAdminPassword = "change-me-admin"
+}
+
+private extension Bundle {
+    func stringValue(forInfoDictionaryKey key: String, fallback: String) -> String {
+        let value = object(forInfoDictionaryKey: key) as? String
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty || trimmed.contains("$(") {
+            return fallback
+        }
+        return trimmed
+    }
 }

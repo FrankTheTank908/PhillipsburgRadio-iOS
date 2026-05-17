@@ -28,6 +28,26 @@ jobs:
           rm -rf build
           mkdir -p build/Payload
 
+      - name: Configure private app endpoint
+        env:
+          APP_FEED_CONFIG_URL: ${{ secrets.APP_FEED_CONFIG_URL }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_FEED_CONFIG_URL:-}" ]; then
+            if [ -n "${PUBLIC_BASE_URL:-}" ]; then
+              APP_FEED_CONFIG_URL="${PUBLIC_BASE_URL%/}/current-feed.json"
+            else
+              APP_FEED_CONFIG_URL="http://example.invalid/current-feed.json"
+              echo "APP_FEED_CONFIG_URL/PUBLIC_BASE_URL secrets are not set; building with placeholder endpoint."
+            fi
+          fi
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :FeedConfigURL ${APP_FEED_CONFIG_URL}" \
+            PhillipsburgRadio/Info.plist
+
       - name: Build app for iPhoneOS unsigned
         run: |
           set -euo pipefail

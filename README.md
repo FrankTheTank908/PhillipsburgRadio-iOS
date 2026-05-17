@@ -10,7 +10,7 @@ The iPhone app never stores Broadcastify, RadioReference, or OpenAI credentials.
 ## Highlights
 
 - Native SwiftUI iPhone app with AVPlayer live audio playback.
-- Pi-only backend at `http://franksplex.com:5214`.
+- Pi-only backend configured privately at build time.
 - Broadcastify domain-key stream resolution kept off-device.
 - Completed-call transcription pipeline for recent scanner traffic.
 - ffmpeg audio cleanup for recorded/archive chunks before transcription.
@@ -26,8 +26,8 @@ The iPhone app never stores Broadcastify, RadioReference, or OpenAI credentials.
 | --- | --- |
 | Feed | Phillipsburg / Easton Public Safety |
 | Broadcastify feed ID | `45951` |
-| Public app backend | `http://franksplex.com:5214` |
-| App config endpoint | `http://franksplex.com:5214/current-feed.json` |
+| Public app backend | Stored in the `PUBLIC_BASE_URL` GitHub secret |
+| App config endpoint | Stored in `APP_FEED_CONFIG_URL`, or derived from `PUBLIC_BASE_URL` |
 | Public feed page | `https://www.broadcastify.com/listen/feed/45951` |
 
 ## Architecture
@@ -43,7 +43,7 @@ flowchart LR
     App --> Incidents["Recent incidents, transcripts, notes"]
 ```
 
-The Pi listens on internal port `80`. The router exposes it as external TCP port `5214`, so the app talks to `http://franksplex.com:5214`. The app has an App Transport Security exception for `franksplex.com`, so this personal build does not require HTTPS or a TLS certificate.
+The Pi listens on internal port `80`. The router exposes it through a private public endpoint stored in GitHub Secrets. The app uses a build-time `FeedConfigURL` value from `Info.plist`, so the real backend host is not committed to the repository.
 
 ## App Experience
 
@@ -114,7 +114,7 @@ Runtime configuration is written into the Pi image by GitHub Actions and copied 
 
 | Variable | Purpose |
 | --- | --- |
-| `BROADCASTIFY_API_KEY` | Approved Broadcastify domain key for the Franksplex backend |
+| `BROADCASTIFY_API_KEY` | Approved Broadcastify domain key for the private backend |
 | `BROADCASTIFY_FEED_ID` | Feed ID, currently `45951` |
 | `BROADCASTIFY_USERNAME` / `BROADCASTIFY_PASSWORD` | Optional feed-owner archive backfill credentials |
 | `RADIOREFERENCE_API_KEY` | Optional RadioReference SOAP app key |
@@ -122,7 +122,9 @@ Runtime configuration is written into the Pi image by GitHub Actions and copied 
 | `OPENAI_API_KEY` | Enables completed-call transcription and incident summarization |
 | `BACKEND_ADMIN_TOKEN` | Server-side admin token when debug no-auth mode is disabled |
 | `ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN` | Personal-build admin bypass, currently `1` |
-| `PUBLIC_BASE_URL` | Public app-facing backend URL, currently `http://franksplex.com:5214` |
+| `PUBLIC_BASE_URL` | Public app-facing backend base URL, stored only as a GitHub secret |
+| `APP_FEED_CONFIG_URL` | Full iOS app config endpoint, stored only as a GitHub secret |
+| `BROADCASTIFY_REFERER` | Broadcastify-approved backend referer, stored only as a GitHub secret |
 | `BACKEND_PORT` | Pi-local HTTP port, currently `80` |
 
 Transcript tuning is also controlled through env values:

@@ -3,9 +3,9 @@
 Broadcastify domain-key backend updater for the Phillipsburg Radio Pi image.
 
 The service reads config from the boot partition, loads the official
-Broadcastify embed player for the approved franksplex.com domain key, extracts
+Broadcastify embed player for the approved backend domain key, extracts
 the current playable audio URL, and writes app JSON locally for the Pi HTTP
-server at http://franksplex.com:5214.
+server.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ DEFAULT_ENV_FILES = [
 
 DEFAULT_EMBED_PLAYER_URL = "https://api.broadcastify.com/embed/player/"
 DEFAULT_LISTENERS_URL_TEMPLATE = "http://api.broadcastify.com/listeners/feed/{feed_id}"
-DEFAULT_REFERER = "http://Franksplex.com/"
+DEFAULT_REFERER = "http://example.invalid/"
 DEFAULT_FEED_ID = "45951"
 DEFAULT_FEED_TITLE = "Phillipsburg / Easton Public Safety"
 DEFAULT_BITRATE = 32
@@ -144,7 +144,7 @@ def fetch_broadcastify_feed(embed_player_url: str, api_key: str, feed_id: str) -
 def embed_headers() -> Dict[str, str]:
     referer = os.environ.get("BROADCASTIFY_REFERER", DEFAULT_REFERER).strip() or DEFAULT_REFERER
     parsed = urlparse(referer)
-    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "http://Franksplex.com"
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "http://example.invalid"
     return {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Origin": origin,
@@ -169,8 +169,7 @@ def fetch_text(url: str, headers: Dict[str, str]) -> str:
         detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(
             f"Broadcastify embed player returned HTTP {error.code}: {detail[:240]}. "
-            "If this is 403, confirm the key is the domain key for http://Franksplex.com "
-            "and that BROADCASTIFY_REFERER is set to http://Franksplex.com/."
+            "If this is 403, confirm the key matches BROADCASTIFY_REFERER."
         ) from error
     except URLError as error:
         raise RuntimeError(f"Could not call Broadcastify embed player: {error.reason}") from error

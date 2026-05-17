@@ -89,6 +89,8 @@ jobs:
           BROADCASTIFY_USERNAME: ${{ secrets.BROADCASTIFY_USERNAME }}
           BROADCASTIFY_PASSWORD: ${{ secrets.BROADCASTIFY_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          BROADCASTIFY_REFERER: ${{ secrets.BROADCASTIFY_REFERER }}
           BACKEND_ADMIN_TOKEN: ${{ secrets.BACKEND_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
@@ -106,6 +108,16 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
+          from urllib.parse import urlparse
+
+          public_base_url = os.environ.get("PUBLIC_BASE_URL", "").strip() or "http://example.invalid"
+          referer = os.environ.get("BROADCASTIFY_REFERER", "").strip()
+          if not referer:
+              parsed = urlparse(public_base_url)
+              if parsed.scheme and parsed.netloc:
+                  referer = f"{parsed.scheme}://{parsed.netloc}/"
+              else:
+                  referer = "http://example.invalid/"
 
           replacements = {
               "BROADCASTIFY_API_KEY": os.environ["BROADCASTIFY_API_KEY"],
@@ -117,7 +129,8 @@ jobs:
               "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", ""),
               "BACKEND_ADMIN_TOKEN": os.environ.get("ADMIN_TOKEN", ""),
               "ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN": "1",
-              "PUBLIC_BASE_URL": "http://franksplex.com:5214",
+              "PUBLIC_BASE_URL": public_base_url,
+              "BROADCASTIFY_REFERER": referer,
           }
 
           template_path = Path("backend/phillipsburg-radio.env.template")
@@ -132,7 +145,7 @@ jobs:
           output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
-          echo "Prepared backend config for feed 45951 on Pi port 80 with public URL http://franksplex.com:5214."
+          echo "Prepared backend config for feed 45951 on Pi port 80."
 
       - name: Install backend into Raspberry Pi image
         run: |
