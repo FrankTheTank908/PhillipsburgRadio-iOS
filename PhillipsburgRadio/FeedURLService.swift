@@ -24,7 +24,7 @@ enum FeedURLError: LocalizedError {
 }
 
 final class FeedURLService {
-    func fetchCurrentConfig(feedConfigURL: String, forceRefresh: Bool = false) async throws -> FeedConfig {
+    func fetchCurrentConfig(feedConfigURL: String, feedId: String? = nil, forceRefresh: Bool = false) async throws -> FeedConfig {
         guard !feedConfigURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw FeedURLError.missingConfigURL
         }
@@ -34,6 +34,13 @@ final class FeedURLService {
             var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         else {
             throw FeedURLError.invalidConfigURL
+        }
+
+        if let feedId, !feedId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "feedId" || $0.name == "feed_id" }
+            queryItems.append(URLQueryItem(name: "feedId", value: feedId.trimmingCharacters(in: .whitespacesAndNewlines)))
+            components.queryItems = queryItems
         }
 
         if forceRefresh {
@@ -69,9 +76,41 @@ final class FeedURLService {
         return config
     }
 
-    func fetchCurrentStreamURL(feedConfigURL: String) async throws -> URL {
-        let config = try await fetchCurrentConfig(feedConfigURL: feedConfigURL)
+    func fetchCurrentStreamURL(feedConfigURL: String, feedId: String? = nil) async throws -> URL {
+        let config = try await fetchCurrentConfig(feedConfigURL: feedConfigURL, feedId: feedId)
         return try validatedStreamURL(from: config)
+    }
+
+    func makeBackendURL(feedConfigURL: String, path: String, queryItems: [URLQueryItem] = []) throws -> URL {
+        guard
+            let url = URL(string: feedConfigURL),
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else {
+            throw FeedURLError.invalidConfigURL
+        }
+
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+
+        guard let builtURL = components.url else {
+            throw FeedURLError.invalidConfigURL
+        }
+
+        return builtURL
+    }
+
+    func fetchCatalog(feedConfigURL: String, path: String, queryItems: [URLQueryItem] = []) async throws -> CatalogResponse {
+        let url = try makeBackendURL(feedConfigURL: feedConfigURL, path: path, queryItems: queryItems)
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 14
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw FeedURLError.badServerResponse
+        }
+        return try JSONDecoder().decode(CatalogResponse.self, from: data)
     }
 
     private func validatedStreamURL(from config: FeedConfig) throws -> URL {

@@ -13,6 +13,56 @@ struct FeedConfig: Codable {
     let message: String?
 }
 
+struct CatalogResponse: Codable {
+    let source: String?
+    let action: String?
+    let count: Int?
+    let items: [CatalogItem]
+    let message: String?
+}
+
+struct CatalogItem: Identifiable, Codable, Hashable {
+    let id: String
+    let name: String
+    let type: String?
+    let feedId: String?
+    let countryId: String?
+    let stateId: String?
+    let countyId: String?
+    let genre: String?
+    let status: String?
+    let listeners: Int?
+    let bitrate: Int?
+    let subtitle: String?
+
+    var displaySubtitle: String {
+        [subtitle, genre, status]
+            .compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: " | ")
+    }
+
+    var resolvedFeedId: String {
+        feedId ?? id
+    }
+}
+
+struct PlaySessionResponse: Codable {
+    let ok: Bool
+    let allowed: Bool
+    let reason: String?
+    let feedId: String?
+    let expiresAt: String?
+}
+
+struct AppleEntitlementResponse: Codable {
+    let ok: Bool
+    let active: Bool
+    let message: String?
+}
+
 struct TranscriptEvent: Identifiable, Codable {
     let id: UUID
     let timestamp: String

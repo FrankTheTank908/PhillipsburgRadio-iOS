@@ -17,9 +17,17 @@ enum AppConfig {
         fallback: "http://example.invalid/current-feed.json"
     )
 
-    static let appTitle = "Phillipsburg Radio"
-    static let feedTitle = "Phillipsburg / Easton Public Safety"
-    static let subtitle = "Broadcastify audio with recent incident transcripts"
+    static let appTitle = "Police Scanner"
+    static let feedTitle = "Worldwide Scanner"
+    static let subtitle = "Browse live public-safety audio by country, state, and county"
+    static let premiumProductID = Bundle.main.stringValue(
+        forInfoDictionaryKey: "PremiumProductID",
+        fallback: "com.frankpinheiro.scanner.premium.monthly"
+    )
+    static let adMobRewardedAdUnitID = Bundle.main.stringValue(
+        forInfoDictionaryKey: "AdMobRewardedAdUnitID",
+        fallback: ""
+    )
     static let automaticRetryLimit = 2
     static let stallRecoverySeconds = 12
     // Personal debug build: admin tools are visible without a password.

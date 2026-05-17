@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import uuid
+import base64
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from broadcastify_api_backend import (
+    DEFAULT_AUDIO_API_URL,
     DEFAULT_EMBED_PLAYER_URL,
     DEFAULT_ENV_FILES,
     DEFAULT_FEED_ID,
@@ -35,8 +37,10 @@ from broadcastify_api_backend import (
     DEFAULT_TTL_SECONDS,
     build_feed_config,
     embed_player_url_from_env,
+    fetch_broadcastify_catalog,
     fetch_broadcastify_feed,
     load_first_existing_env_file,
+    normalize_catalog_response,
     write_json,
 )
 from radioreference_api import (
@@ -52,6 +56,7 @@ DEFAULT_PORT = 80
 DEFAULT_TRANSCRIPTS_PATH = "/var/lib/phillipsburg-radio/transcripts.jsonl"
 DEFAULT_INCIDENTS_PATH = "/var/lib/phillipsburg-radio/incidents.jsonl"
 DEFAULT_INCIDENT_STATE_PATH = "/var/lib/phillipsburg-radio/incident-state.json"
+DEFAULT_ENTITLEMENTS_PATH = "/var/lib/phillipsburg-radio/entitlements.json"
 DEFAULT_PIPELINE_STATUS_PATH = "/var/lib/phillipsburg-radio/transcript-pipeline-status.json"
 DEFAULT_MAX_TRANSCRIPTS = 200
 DEFAULT_MAX_INCIDENTS = 200
@@ -64,38 +69,56 @@ class BackendState:
         self.lock = threading.Lock()
         self.loaded_env_file = load_first_existing_env_file(DEFAULT_ENV_FILES)
         self.api_key = required_env("BROADCASTIFY_API_KEY")
+        self.catalog_api_key = os.environ.get("BROADCASTIFY_CATALOG_API_KEY", "").strip() or self.api_key
         self.feed_id = os.environ.get("BROADCASTIFY_FEED_ID", DEFAULT_FEED_ID).strip()
+        self.catalog_api_url = os.environ.get("BROADCASTIFY_AUDIO_API_URL", DEFAULT_AUDIO_API_URL).strip() or DEFAULT_AUDIO_API_URL
         self.embed_player_url = embed_player_url_from_env() or DEFAULT_EMBED_PLAYER_URL
         self.output_path = os.environ.get("OUTPUT_JSON_PATH", DEFAULT_OUTPUT_PATH).strip()
         self.transcripts_path = os.environ.get("TRANSCRIPTS_PATH", DEFAULT_TRANSCRIPTS_PATH).strip()
         self.incidents_path = os.environ.get("INCIDENTS_PATH", DEFAULT_INCIDENTS_PATH).strip()
         self.incident_state_path = os.environ.get("INCIDENT_STATE_PATH", DEFAULT_INCIDENT_STATE_PATH).strip()
+        self.entitlements_path = os.environ.get("ENTITLEMENTS_PATH", DEFAULT_ENTITLEMENTS_PATH).strip()
         self.pipeline_status_path = os.environ.get("PIPELINE_STATUS_PATH", DEFAULT_PIPELINE_STATUS_PATH).strip()
         self.ttl_seconds = int(os.environ.get("STREAM_URL_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
         self.cache_seconds = int(os.environ.get("CACHE_SECONDS", str(DEFAULT_CACHE_SECONDS)))
         self.public_base_url = os.environ.get("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL).strip() or DEFAULT_PUBLIC_BASE_URL
         self.admin_token = os.environ.get("BACKEND_ADMIN_TOKEN", "").strip()
         self.allow_debug_admin_without_token = env_bool("ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN", True)
+        self.allow_debug_ad_access = env_bool("ALLOW_DEBUG_AD_ACCESS", True)
+        self.app_store_debug_trust_client = env_bool("APP_STORE_DEBUG_TRUST_CLIENT", False)
+        self.premium_product_ids = {
+            value.strip()
+            for value in os.environ.get("PREMIUM_PRODUCT_IDS", "com.frankpinheiro.scanner.premium.monthly").split(",")
+            if value.strip()
+        }
         self.radio_reference = RadioReferenceClient.from_env()
         self.last_config: Optional[Dict[str, Any]] = read_json_if_exists(self.output_path)
+        self.feed_config_cache: Dict[str, Dict[str, Any]] = {}
+        if self.last_config:
+            self.feed_config_cache[str(self.last_config.get("feedId") or self.feed_id)] = self.last_config
+        self.catalog_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
         self.last_refresh_epoch = 0.0
         self.last_error: Optional[str] = None
         self.logs: List[Dict[str, str]] = []
         self.log("info", "Backend initialized")
 
-    def get_config(self, force: bool = False) -> Dict[str, Any]:
+    def get_config(self, force: bool = False, feed_id: Optional[str] = None) -> Dict[str, Any]:
         now = time.time()
+        requested_feed_id = str(feed_id or self.feed_id).strip() or self.feed_id
         with self.lock:
-            if self.last_config and not force and now - self.last_refresh_epoch < self.cache_seconds:
-                return self.last_config
+            cached = self.feed_config_cache.get(requested_feed_id)
+            if cached and not force and now - self.last_refresh_epoch < self.cache_seconds:
+                return cached
 
         try:
-            payload = fetch_broadcastify_feed(self.embed_player_url, self.api_key, self.feed_id)
-            config = build_feed_config(payload, self.feed_id, self.ttl_seconds)
-            write_json(self.output_path, config)
+            payload = fetch_broadcastify_feed(self.embed_player_url, self.api_key, requested_feed_id)
+            config = build_feed_config(payload, requested_feed_id, self.ttl_seconds)
+            if requested_feed_id == self.feed_id:
+                write_json(self.output_path, config)
 
             with self.lock:
                 self.last_config = config
+                self.feed_config_cache[requested_feed_id] = config
                 self.last_refresh_epoch = now
                 self.last_error = None
                 self.log("info", f"Feed config refreshed for feed {config.get('feedId')}")
@@ -121,9 +144,11 @@ class BackendState:
                 "loadedEnvFile": self.loaded_env_file,
                 "hasDomainKey": bool(self.api_key),
                 "hasApiKey": bool(self.api_key),
+                "hasCatalogApiKey": bool(self.catalog_api_key),
                 "hasRadioReferenceAuth": self.radio_reference.has_auth,
                 "hasOpenAIKey": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
                 "debugAdminNoAuth": self.allow_debug_admin_without_token,
+                "debugAdAccess": self.allow_debug_ad_access,
                 "transcriptPipeline": self.pipeline_status(),
                 "lastRefreshEpoch": self.last_refresh_epoch,
                 "lastError": self.last_error,
@@ -147,9 +172,17 @@ class BackendState:
             "routes": [
                 "/health",
                 "/current-feed.json",
+                "/current-feed.json?feedId=45951",
+                "/catalog/countries",
+                "/catalog/states?coid=1",
+                "/catalog/counties?stid=34",
+                "/catalog/feeds?ctid=1778",
+                "/catalog/feed?feedId=45951",
                 "/metadata",
                 "/transcripts",
                 "/incidents",
+                "/access/play-session",
+                "/entitlements/apple/verify",
                 "/radio-reference/methods",
                 "/radio-reference/countries",
                 "/radio-reference/country?coid=1",
@@ -163,8 +196,25 @@ class BackendState:
                 "RadioReference SOAP is for database metadata and account feed details.",
                 "Completed-call transcripts are produced by the Pi transcript pipeline when OPENAI_API_KEY is configured.",
                 "Broadcastify live audio and AI/ML use are subject to Broadcastify licensing.",
+                "Purchase validation must be server-side before this becomes a public freemium app.",
             ],
         }
+
+    def catalog(self, action: str, params: Dict[str, Any], force: bool = False) -> Dict[str, Any]:
+        cache_key = json.dumps({"action": action, "params": params}, sort_keys=True)
+        now = time.time()
+        with self.lock:
+            cached = self.catalog_cache.get(cache_key)
+            if cached and not force and now - cached[0] < self.cache_seconds:
+                return cached[1]
+
+        payload = fetch_broadcastify_catalog(action, self.catalog_api_key, params, self.catalog_api_url)
+        normalized = normalize_catalog_response(action, payload)
+        normalized["query"] = params
+        with self.lock:
+            self.catalog_cache[cache_key] = (now, normalized)
+            self.log("info", f"Catalog refreshed action={action} count={normalized.get('count')}")
+        return normalized
 
     def read_transcripts(self, limit: int = 50) -> List[Dict[str, Any]]:
         return read_jsonl_tail(self.transcripts_path, limit)
@@ -226,6 +276,83 @@ class BackendState:
         self.log("info", "Incident message saved")
         return message
 
+    def verify_apple_entitlement(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        signed_transaction = str(payload.get("signedTransactionInfo") or "").strip()
+        product_id = str(payload.get("productId") or "").strip()
+        transaction_id = str(payload.get("transactionId") or "").strip()
+        account_token = str(payload.get("appAccountToken") or payload.get("deviceAccountToken") or "").strip()
+
+        if not signed_transaction:
+            raise ValueError("signedTransactionInfo is required")
+        if product_id and product_id not in self.premium_product_ids:
+            raise ValueError("Unknown premium product id")
+
+        decoded_payload = decode_unverified_jws_payload(signed_transaction)
+        product_id = product_id or str(decoded_payload.get("productId") or "")
+        transaction_id = transaction_id or str(decoded_payload.get("transactionId") or "")
+        original_transaction_id = str(decoded_payload.get("originalTransactionId") or transaction_id)
+        expires_ms = int(decoded_payload.get("expiresDate") or 0)
+        expires_at = iso_from_millis(expires_ms) if expires_ms else None
+        is_known_product = product_id in self.premium_product_ids
+        is_expired = bool(expires_ms and expires_ms < int(time.time() * 1000))
+        active = bool(is_known_product and not is_expired and self.app_store_debug_trust_client)
+        verification_state = "debug-client-trusted" if self.app_store_debug_trust_client else "server-validation-required"
+
+        record = {
+            "accountToken": account_token,
+            "productId": product_id,
+            "transactionId": transaction_id,
+            "originalTransactionId": original_transaction_id,
+            "expiresAt": expires_at,
+            "active": active,
+            "verificationState": verification_state,
+            "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        if active:
+            entitlements = read_json_if_exists(self.entitlements_path) or {"apple": {}}
+            apple = entitlements.setdefault("apple", {})
+            apple[account_token or original_transaction_id] = record
+            write_json(self.entitlements_path, entitlements)
+
+        message = (
+            "Debug trust accepted the StoreKit transaction."
+            if active
+            else "Server-side Apple transaction validation is not configured; do not grant production entitlement from client data."
+        )
+        self.log("info", f"Apple entitlement checked product={product_id} state={verification_state}")
+        return {"ok": True, "active": active, "message": message, "entitlement": record}
+
+    def play_session(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        account_token = str(payload.get("appAccountToken") or payload.get("deviceAccountToken") or "").strip()
+        feed_id = str(payload.get("feedId") or self.feed_id).strip()
+        if self.has_active_entitlement(account_token):
+            return {"ok": True, "allowed": True, "reason": "premium", "feedId": feed_id}
+        if self.allow_debug_ad_access:
+            return {
+                "ok": True,
+                "allowed": True,
+                "reason": "debug-ad-session",
+                "feedId": feed_id,
+                "expiresAt": iso_from_millis(int(time.time() * 1000) + 30 * 60 * 1000),
+            }
+        return {"ok": True, "allowed": False, "reason": "premium-or-rewarded-ad-required", "feedId": feed_id}
+
+    def has_active_entitlement(self, account_token: str) -> bool:
+        if not account_token:
+            return False
+        entitlements = read_json_if_exists(self.entitlements_path) or {}
+        record = (entitlements.get("apple") or {}).get(account_token)
+        if not isinstance(record, dict) or not record.get("active"):
+            return False
+        expires_at = record.get("expiresAt")
+        if not expires_at:
+            return True
+        try:
+            normalized = expires_at.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized) > datetime.now(timezone.utc)
+        except ValueError:
+            return False
+
     def radio_reference_methods(self) -> Dict[str, Any]:
         catalog = method_catalog()
         catalog["configured"] = self.radio_reference.has_auth
@@ -268,7 +395,12 @@ class Handler(BaseHTTPRequestHandler):
 
             if parsed.path in {"/current-feed.json", "/config"}:
                 force = query.get("refresh", ["0"])[0] == "1" or query.get("force", ["0"])[0] == "1"
-                self.respond_json(STATE.get_config(force=force))
+                feed_id = query.get("feedId", query.get("feed_id", [""]))[0].strip() or None
+                self.respond_json(STATE.get_config(force=force, feed_id=feed_id))
+                return
+
+            if parsed.path.startswith("/catalog/"):
+                self.respond_json(self.handle_catalog_get(parsed.path, query))
                 return
 
             if parsed.path in {"/metadata", "/radio-reference", "/radioreference"}:
@@ -343,7 +475,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.is_admin_authorized():
                     self.respond_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                     return
-                self.respond_json({"ok": True, "config": STATE.get_config(force=True)})
+                payload = self.read_json_body()
+                feed_id = str(payload.get("feedId") or "").strip() or None
+                self.respond_json({"ok": True, "config": STATE.get_config(force=True, feed_id=feed_id)})
+                return
+
+            if parsed.path == "/entitlements/apple/verify":
+                payload = self.read_json_body()
+                self.respond_json(STATE.verify_apple_entitlement(payload))
+                return
+
+            if parsed.path == "/access/play-session":
+                payload = self.read_json_body()
+                self.respond_json(STATE.play_session(payload))
                 return
 
             self.respond_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
@@ -388,6 +532,31 @@ class Handler(BaseHTTPRequestHandler):
             return STATE.call_radio_reference(method, params)
 
         raise ValueError(f"Unsupported RadioReference route: {name}")
+
+    def handle_catalog_get(self, path: str, query: Dict[str, List[str]]) -> Dict[str, Any]:
+        name = path.strip("/").split("/", 1)[1]
+        force = query.get("refresh", ["0"])[0] == "1" or query.get("force", ["0"])[0] == "1"
+
+        if name == "countries":
+            return STATE.catalog("countries", {}, force=force)
+
+        if name == "states":
+            return STATE.catalog("states", {"coid": query_required_int(query, "coid")}, force=force)
+
+        if name == "counties":
+            return STATE.catalog("counties", {"stid": query_required_int(query, "stid")}, force=force)
+
+        if name == "feeds":
+            params: Dict[str, Any] = {}
+            copy_optional_query(query, params, ["coid", "stid", "ctid", "top", "new", "s", "genre"])
+            if "ctid" in params:
+                return STATE.catalog("county", {"ctid": params["ctid"]}, force=force)
+            return STATE.catalog("feeds", params, force=force)
+
+        if name == "feed":
+            return STATE.catalog("feed", {"feedId": query_required(query, "feedId")}, force=force)
+
+        raise ValueError(f"Unsupported catalog route: {name}")
 
     def respond_sse(self) -> None:
         events = STATE.read_transcripts(limit=25)
@@ -495,6 +664,13 @@ def query_required_int(query: Dict[str, List[str]], name: str) -> int:
     return int(query_required(query, name))
 
 
+def copy_optional_query(query: Dict[str, List[str]], target: Dict[str, Any], names: List[str]) -> None:
+    for name in names:
+        value = query.get(name, [""])[0].strip()
+        if value:
+            target[name] = value
+
+
 def radio_reference_search_params(query: Dict[str, List[str]]) -> tuple[str, Dict[str, Any]]:
     scope = query.get("scope", ["county"])[0].strip().lower()
     freq = query_required(query, "freq")
@@ -522,6 +698,23 @@ def query_params_for_method(method: str, query: Dict[str, List[str]]) -> Dict[st
 
 def server_port() -> int:
     return int(os.environ.get("BACKEND_PORT", str(DEFAULT_PORT)))
+
+
+def decode_unverified_jws_payload(jws_value: str) -> Dict[str, Any]:
+    parts = jws_value.split(".")
+    if len(parts) != 3:
+        raise ValueError("signedTransactionInfo must be a compact JWS")
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    decoded = base64.urlsafe_b64decode((payload + padding).encode("utf-8"))
+    data = json.loads(decoded.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("signedTransactionInfo payload is not a JSON object")
+    return data
+
+
+def iso_from_millis(value: int) -> str:
+    return datetime.fromtimestamp(value / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def run() -> int:

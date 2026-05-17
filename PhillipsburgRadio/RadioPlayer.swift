@@ -29,25 +29,26 @@ final class RadioPlayer: ObservableObject {
     private var activeRequestID: UUID?
     private var logger: AppLogStore?
     private var currentSettings: PlayerSettingsSnapshot = .default
+    private var currentFeed: CatalogItem?
 
     func attachLogger(_ logger: AppLogStore) {
         self.logger = logger
     }
 
-    func playOrStop(using settings: PlayerSettingsSnapshot) {
+    func playOrStop(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) {
         if wantsPlayback || isLoading {
             stop()
         } else {
-            Task { await start(using: settings) }
+            Task { await start(using: settings, feed: feed) }
         }
     }
 
-    func start(using settings: PlayerSettingsSnapshot) async {
-        await startPlayback(resetRetryCount: true, settings: settings)
+    func start(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
+        await startPlayback(resetRetryCount: true, settings: settings, feed: feed)
     }
 
-    func refreshAndRetry(using settings: PlayerSettingsSnapshot) async {
-        await startPlayback(resetRetryCount: true, settings: settings)
+    func refreshAndRetry(using settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
+        await startPlayback(resetRetryCount: true, settings: settings, feed: feed)
     }
 
     func stop() {
@@ -64,8 +65,11 @@ final class RadioPlayer: ObservableObject {
         statusText = "Stopped"
     }
 
-    private func startPlayback(resetRetryCount: Bool, settings: PlayerSettingsSnapshot) async {
+    private func startPlayback(resetRetryCount: Bool, settings: PlayerSettingsSnapshot, feed: CatalogItem? = nil) async {
         currentSettings = settings
+        if let feed {
+            currentFeed = feed
+        }
         retryTask?.cancel()
         retryTask = nil
         stallRecoveryTask?.cancel()
@@ -88,6 +92,7 @@ final class RadioPlayer: ObservableObject {
             let shouldForceRefresh = retryCount > 0 || (resetRetryCount && !currentStreamURL.isEmpty)
             let config = try await feedService.fetchCurrentConfig(
                 feedConfigURL: settings.feedConfigURL,
+                feedId: feed?.resolvedFeedId,
                 forceRefresh: shouldForceRefresh
             )
 
@@ -103,7 +108,7 @@ final class RadioPlayer: ObservableObject {
             lastUpdated = config.updatedAt ?? "No update time provided"
             expiresAt = config.expiresAt ?? "Not provided"
             source = config.source ?? "Unknown source"
-            feedId = config.feedId ?? "Phillipsburg / Easton Public Safety"
+            feedId = config.feedId ?? feed?.name ?? "Selected Feed"
             apiStatus = config.status ?? "Unknown"
             listenerCount = config.listeners.map { String($0) } ?? "Unknown"
             bitrate = config.bitrate.map { "\($0) kbps" } ?? "Unknown"
@@ -261,6 +266,7 @@ final class RadioPlayer: ObservableObject {
         logInfo("Retry \(retryCount) scheduled")
         retryTask?.cancel()
         let retrySettings = currentSettings
+        let retryFeed = currentFeed
         retryTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 1_500_000_000)
@@ -270,7 +276,7 @@ final class RadioPlayer: ObservableObject {
 
             guard !Task.isCancelled else { return }
 
-            await self?.startPlayback(resetRetryCount: false, settings: retrySettings)
+            await self?.startPlayback(resetRetryCount: false, settings: retrySettings, feed: retryFeed)
         }
     }
 

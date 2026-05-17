@@ -52,4 +52,23 @@ assert backend.extract_stream_url_from_embed_html(
     "https://api.broadcastify.com/embed/player/?feedId=45951",
 ) == "https://listen.broadcastify.com/example-token.mp3"
 
+catalog = backend.normalize_catalog_response(
+    "feeds",
+    {
+        "feeds": [
+            {
+                "feedId": 123,
+                "descr": "City Police Dispatch",
+                "listeners": "17",
+                "bitrate": "32",
+                "ctid": 99,
+            }
+        ]
+    },
+)
+assert catalog["items"][0]["id"] == "123"
+assert catalog["items"][0]["name"] == "City Police Dispatch"
+assert catalog["items"][0]["feedId"] == "123"
+assert catalog["items"][0]["countyId"] == "99"
+
 print("backend parser tests ok")

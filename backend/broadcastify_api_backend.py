@@ -30,6 +30,7 @@ DEFAULT_ENV_FILES = [
     "/etc/phillipsburg-radio/backend.env",
 ]
 
+DEFAULT_AUDIO_API_URL = "https://api.broadcastify.com/audio/"
 DEFAULT_EMBED_PLAYER_URL = "https://api.broadcastify.com/embed/player/"
 DEFAULT_LISTENERS_URL_TEMPLATE = "http://api.broadcastify.com/listeners/feed/{feed_id}"
 DEFAULT_REFERER = "http://example.invalid/"
@@ -139,6 +140,148 @@ def fetch_broadcastify_feed(embed_player_url: str, api_key: str, feed_id: str) -
             "streamUrl": stream_url,
         }
     }
+
+
+def fetch_broadcastify_catalog(
+    action: str,
+    api_key: str,
+    params: Optional[Dict[str, Any]] = None,
+    api_base_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    query_params = {
+        "a": action,
+        "type": "json",
+        "key": api_key,
+    }
+    for key, value in (params or {}).items():
+        if value is None or str(value).strip() == "":
+            continue
+        query_params[key] = value
+
+    base_url = (api_base_url or os.environ.get("BROADCASTIFY_AUDIO_API_URL", DEFAULT_AUDIO_API_URL)).strip()
+    separator = "&" if "?" in base_url else "?"
+    url = f"{base_url}{separator}{urlencode(query_params)}"
+    body = fetch_text(
+        url,
+        {
+            "Accept": "application/json,*/*",
+            "User-Agent": "PhillipsburgRadioBackend/1.0",
+        },
+    )
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"Broadcastify catalog API did not return JSON: {body[:240]}") from error
+
+
+def normalize_catalog_response(action: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw_items = find_catalog_items(payload)
+    items = [normalize_catalog_item(action, item) for item in raw_items if isinstance(item, dict)]
+    return {
+        "source": "broadcastify-live-audio-catalog",
+        "action": action,
+        "count": len(items),
+        "items": items,
+    }
+
+
+def find_catalog_items(payload: Any) -> list[Dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+
+    if not isinstance(payload, dict):
+        return []
+
+    preferred_keys = [
+        "countries",
+        "Countries",
+        "states",
+        "States",
+        "counties",
+        "Counties",
+        "feeds",
+        "Feeds",
+        "feed",
+        "Feed",
+        "items",
+        "data",
+    ]
+    for key in preferred_keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            nested = find_catalog_items(value)
+            if nested:
+                return nested
+
+    nested_items: list[Dict[str, Any]] = []
+    for value in payload.values():
+        if isinstance(value, list):
+            nested_items.extend(item for item in value if isinstance(item, dict))
+    return nested_items
+
+
+def normalize_catalog_item(action: str, item: Dict[str, Any]) -> Dict[str, Any]:
+    identifier = first_value(
+        item,
+        [
+            "id",
+            "feedId",
+            "feed_id",
+            "coid",
+            "countryId",
+            "stid",
+            "stateId",
+            "ctid",
+            "countyId",
+        ],
+    )
+    name = first_value(
+        item,
+        [
+            "name",
+            "title",
+            "descr",
+            "description",
+            "countryName",
+            "stateName",
+            "countyName",
+        ],
+    )
+    feed_id = first_value(item, ["feedId", "feed_id", "id"]) if action in {"feeds", "county", "feed"} else None
+    return {
+        "id": str(identifier or name or ""),
+        "name": str(name or identifier or "Unknown"),
+        "type": catalog_item_type(action),
+        "feedId": str(feed_id) if feed_id is not None else None,
+        "countryId": string_or_none(first_value(item, ["coid", "countryId", "country_id"])),
+        "stateId": string_or_none(first_value(item, ["stid", "stateId", "state_id"])),
+        "countyId": string_or_none(first_value(item, ["ctid", "countyId", "county_id"])),
+        "genre": string_or_none(first_value(item, ["genre", "genreName", "genre_name"])),
+        "status": string_or_none(first_value(item, ["status", "online"])),
+        "listeners": number_or_none(first_value(item, ["listeners", "listenerCount", "listener_count"])),
+        "bitrate": number_or_none(first_value(item, ["bitrate", "bitRate", "bit_rate"])),
+        "subtitle": string_or_none(first_value(item, ["location", "county", "state", "country", "notes"])),
+        "raw": item,
+    }
+
+
+def catalog_item_type(action: str) -> str:
+    if action == "countries":
+        return "country"
+    if action == "states":
+        return "state"
+    if action == "counties":
+        return "county"
+    return "feed"
+
+
+def string_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def embed_headers() -> Dict[str, str]:

@@ -83,6 +83,7 @@ jobs:
       - name: Prepare backend config
         env:
           BROADCASTIFY_API_KEY: ${{ secrets.BROADCASTIFY_API_KEY }}
+          BROADCASTIFY_CATALOG_API_KEY: ${{ secrets.BROADCASTIFY_CATALOG_API_KEY }}
           RADIOREFERENCE_API_KEY: ${{ secrets.RADIOREFERENCE_API_KEY }}
           RADIOREFERENCE_USERNAME: ${{ secrets.RADIOREFERENCE_USERNAME }}
           RADIOREFERENCE_PASSWORD: ${{ secrets.RADIOREFERENCE_PASSWORD }}
@@ -92,6 +93,9 @@ jobs:
           PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
           BROADCASTIFY_REFERER: ${{ secrets.BROADCASTIFY_REFERER }}
           BACKEND_ADMIN_TOKEN: ${{ secrets.BACKEND_ADMIN_TOKEN }}
+          PREMIUM_PRODUCT_IDS: ${{ secrets.PREMIUM_PRODUCT_IDS }}
+          APP_STORE_DEBUG_TRUST_CLIENT: ${{ secrets.APP_STORE_DEBUG_TRUST_CLIENT }}
+          ALLOW_DEBUG_AD_ACCESS: ${{ secrets.ALLOW_DEBUG_AD_ACCESS }}
         run: |
           set -euo pipefail
 
@@ -121,6 +125,7 @@ jobs:
 
           replacements = {
               "BROADCASTIFY_API_KEY": os.environ["BROADCASTIFY_API_KEY"],
+              "BROADCASTIFY_CATALOG_API_KEY": os.environ.get("BROADCASTIFY_CATALOG_API_KEY", ""),
               "RADIOREFERENCE_API_KEY": os.environ["RR_API_KEY"],
               "RADIOREFERENCE_USERNAME": os.environ.get("RADIOREFERENCE_USERNAME", ""),
               "RADIOREFERENCE_PASSWORD": os.environ.get("RADIOREFERENCE_PASSWORD", ""),
@@ -131,6 +136,9 @@ jobs:
               "ALLOW_DEBUG_ADMIN_WITHOUT_TOKEN": "1",
               "PUBLIC_BASE_URL": public_base_url,
               "BROADCASTIFY_REFERER": referer,
+              "PREMIUM_PRODUCT_IDS": os.environ.get("PREMIUM_PRODUCT_IDS", "com.frankpinheiro.scanner.premium.monthly"),
+              "APP_STORE_DEBUG_TRUST_CLIENT": os.environ.get("APP_STORE_DEBUG_TRUST_CLIENT", "0"),
+              "ALLOW_DEBUG_AD_ACCESS": os.environ.get("ALLOW_DEBUG_AD_ACCESS", "1"),
           }
 
           template_path = Path("backend/phillipsburg-radio.env.template")

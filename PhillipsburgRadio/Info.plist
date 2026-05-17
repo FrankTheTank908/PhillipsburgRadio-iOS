@@ -29,6 +29,12 @@
     </dict>
     <key>FeedConfigURL</key>
     <string>$(APP_FEED_CONFIG_URL)</string>
+    <key>PremiumProductID</key>
+    <string>$(PREMIUM_PRODUCT_ID)</string>
+    <key>AdMobRewardedAdUnitID</key>
+    <string>$(ADMOB_REWARDED_AD_UNIT_ID)</string>
+    <key>GADApplicationIdentifier</key>
+    <string>$(ADMOB_APP_ID)</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

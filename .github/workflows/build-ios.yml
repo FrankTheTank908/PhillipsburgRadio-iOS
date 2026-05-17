@@ -32,6 +32,9 @@ jobs:
         env:
           APP_FEED_CONFIG_URL: ${{ secrets.APP_FEED_CONFIG_URL }}
           PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          PREMIUM_PRODUCT_ID: ${{ secrets.PREMIUM_PRODUCT_ID }}
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+          ADMOB_REWARDED_AD_UNIT_ID: ${{ secrets.ADMOB_REWARDED_AD_UNIT_ID }}
         run: |
           set -euo pipefail
 
@@ -43,9 +46,15 @@ jobs:
               echo "APP_FEED_CONFIG_URL/PUBLIC_BASE_URL secrets are not set; building with placeholder endpoint."
             fi
           fi
+          PREMIUM_PRODUCT_ID="${PREMIUM_PRODUCT_ID:-com.frankpinheiro.scanner.premium.monthly}"
+          ADMOB_APP_ID="${ADMOB_APP_ID:-}"
+          ADMOB_REWARDED_AD_UNIT_ID="${ADMOB_REWARDED_AD_UNIT_ID:-}"
 
           /usr/libexec/PlistBuddy \
             -c "Set :FeedConfigURL ${APP_FEED_CONFIG_URL}" \
+            -c "Set :PremiumProductID ${PREMIUM_PRODUCT_ID}" \
+            -c "Set :AdMobRewardedAdUnitID ${ADMOB_REWARDED_AD_UNIT_ID}" \
+            -c "Set :GADApplicationIdentifier ${ADMOB_APP_ID}" \
             PhillipsburgRadio/Info.plist
 
       - name: Build app for iPhoneOS unsigned

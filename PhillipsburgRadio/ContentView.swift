@@ -6,15 +6,20 @@ struct ContentView: View {
     @StateObject private var logStore = AppLogStore()
     @StateObject private var transcriptStore = TranscriptStore()
     @StateObject private var incidentStore = IncidentStore()
+    @StateObject private var catalogStore = ScannerCatalogStore()
+    @StateObject private var monetizationStore = MonetizationStore()
     @State private var isShowingSettings = false
+    @State private var isShowingAccessGate = false
     @State private var didAutoStart = false
     @State private var incidentDraft = ""
+    @State private var selectedFeed: CatalogItem?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     headerSection
+                    catalogSection
                     playerSection
                     streamConfigSection
                     transcriptSection
@@ -42,23 +47,43 @@ struct ContentView: View {
                     radioPlayer: radioPlayer
                 )
             }
+            .sheet(isPresented: $isShowingAccessGate) {
+                accessGateSheet
+            }
             .onAppear {
                 radioPlayer.attachLogger(logStore)
                 transcriptStore.attachLogger(logStore)
                 incidentStore.attachLogger(logStore)
+                catalogStore.attachLogger(logStore)
+                monetizationStore.attachLogger(logStore)
                 configureTranscriptPolling()
                 configureIncidentPolling()
+                Task {
+                    await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                }
 
                 guard settingsStore.autoPlayOnLaunch, !didAutoStart else {
                     return
                 }
 
                 didAutoStart = true
-                Task { await radioPlayer.start(using: settingsStore.playerSettings) }
+                Task {
+                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                    if monetizationStore.canPlay {
+                        await startPlaybackForSelectedFeed()
+                    } else {
+                        isShowingAccessGate = true
+                    }
+                }
             }
             .onChange(of: settingsStore.feedConfigURL) { _ in
                 configureTranscriptPolling()
                 configureIncidentPolling()
+                Task {
+                    await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                }
             }
             .onChange(of: settingsStore.enableTranscriptPolling) { _ in
                 configureTranscriptPolling()
@@ -74,11 +99,16 @@ struct ContentView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
+            Text(selectedFeed?.name ?? "Choose a feed or use the default Phillipsburg / Easton feed")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Text(AppConfig.subtitle)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Label("32 kbps Broadcastify feed", systemImage: "dot.radiowaves.left.and.right")
+            Label(monetizationStore.statusText, systemImage: monetizationStore.isPremium ? "checkmark.seal.fill" : "play.rectangle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -93,7 +123,7 @@ struct ContentView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        radioPlayer.playOrStop(using: settingsStore.playerSettings)
+                        handlePlayTapped()
                     } label: {
                         Label(playButtonTitle, systemImage: playButtonIcon)
                             .frame(maxWidth: .infinity)
@@ -101,7 +131,7 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
 
                     Button {
-                        Task { await radioPlayer.refreshAndRetry(using: settingsStore.playerSettings) }
+                        Task { await radioPlayer.refreshAndRetry(using: settingsStore.playerSettings, feed: selectedFeed) }
                     } label: {
                         Label("Refresh URL", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
@@ -132,6 +162,87 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var catalogSection: some View {
+        panel {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("Browse Scanner Feeds", systemImage: "globe.americas.fill")
+
+                HStack(spacing: 8) {
+                    TextField("Search feeds", text: $catalogStore.searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+
+                    Button {
+                        Task { await catalogStore.search(feedConfigURL: settingsStore.trimmedFeedConfigURL) }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(catalogStore.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Search feeds")
+                }
+
+                HStack(spacing: 8) {
+                    catalogMenu(
+                        title: catalogStore.selectedCountry?.name ?? "Country",
+                        systemImage: "globe",
+                        items: catalogStore.countries
+                    ) { item in
+                        Task { await catalogStore.chooseCountry(item, feedConfigURL: settingsStore.trimmedFeedConfigURL) }
+                    }
+
+                    catalogMenu(
+                        title: catalogStore.selectedState?.name ?? "State",
+                        systemImage: "map",
+                        items: catalogStore.states
+                    ) { item in
+                        Task { await catalogStore.chooseState(item, feedConfigURL: settingsStore.trimmedFeedConfigURL) }
+                    }
+
+                    catalogMenu(
+                        title: catalogStore.selectedCounty?.name ?? "County",
+                        systemImage: "mappin.and.ellipse",
+                        items: catalogStore.counties
+                    ) { item in
+                        Task { await catalogStore.chooseCounty(item, feedConfigURL: settingsStore.trimmedFeedConfigURL) }
+                    }
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+                if catalogStore.isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Loading scanner catalog...")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let error = catalogStore.lastError {
+                    Text("Catalog backend not reachable: \(error)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if catalogStore.feeds.isEmpty {
+                    Text("Select a country, state, and county to list available feeds.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(catalogStore.feeds.prefix(30)) { feed in
+                        feedRow(feed)
+
+                        if feed.id != catalogStore.feeds.prefix(30).last?.id {
+                            Divider()
+                        }
+                    }
                 }
             }
         }
@@ -301,6 +412,73 @@ struct ContentView: View {
             .font(.headline)
     }
 
+    private func catalogMenu(
+        title: String,
+        systemImage: String,
+        items: [CatalogItem],
+        select: @escaping (CatalogItem) -> Void
+    ) -> some View {
+        Menu {
+            if items.isEmpty {
+                Text("No items loaded")
+            } else {
+                ForEach(items.prefix(150)) { item in
+                    Button(item.name) {
+                        select(item)
+                    }
+                }
+            }
+        } label: {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(items.isEmpty)
+    }
+
+    private func feedRow(_ feed: CatalogItem) -> some View {
+        Button {
+            selectedFeed = feed
+            radioPlayer.stop()
+            logStore.info("Selected feed \(feed.name) id=\(feed.resolvedFeedId)")
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
+                    .foregroundStyle(selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? .green : .secondary)
+                    .frame(width: 20)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(feed.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !feed.displaySubtitle.isEmpty {
+                        Text(feed.displaySubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 10) {
+                        if let listeners = feed.listeners {
+                            Label("\(listeners)", systemImage: "person.2")
+                        }
+                        if let bitrate = feed.bitrate {
+                            Label("\(bitrate) kbps", systemImage: "waveform")
+                        }
+                        Text("ID \(feed.resolvedFeedId)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 4)
+    }
+
     private func configRow(_ title: String, value: String, systemImage: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: systemImage)
@@ -326,6 +504,79 @@ struct ContentView: View {
         }
 
         return "The Pi records finished scanner chunks first, skips silence, then posts the most likely transcript here."
+    }
+
+    private var accessGateSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(selectedFeed?.name ?? AppConfig.feedTitle)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Subscribe or watch a rewarded ad before playback.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task {
+                        let granted = await monetizationStore.requestRewardedPlay(
+                            feedConfigURL: settingsStore.trimmedFeedConfigURL,
+                            feedId: selectedFeed?.resolvedFeedId
+                        )
+                        if granted {
+                            isShowingAccessGate = false
+                            await startPlaybackForSelectedFeed()
+                        }
+                    }
+                } label: {
+                    Label("Watch Ad to Play", systemImage: "play.rectangle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(monetizationStore.isWorking)
+
+                Button {
+                    Task {
+                        await monetizationStore.purchasePremium(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                        if monetizationStore.isPremium {
+                            isShowingAccessGate = false
+                            await startPlaybackForSelectedFeed()
+                        }
+                    }
+                } label: {
+                    Label("Subscribe", systemImage: "checkmark.seal.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(monetizationStore.isWorking)
+
+                if monetizationStore.isWorking {
+                    ProgressView()
+                }
+
+                if let error = monetizationStore.lastError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding(20)
+            .navigationTitle("Playback Access")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        isShowingAccessGate = false
+                    }
+                }
+            }
+        }
     }
 
     private func transcriptRow(_ event: TranscriptEvent) -> some View {
@@ -480,6 +731,23 @@ struct ContentView: View {
                 incidentDraft = ""
             }
         }
+    }
+
+    private func handlePlayTapped() {
+        if radioPlayer.isPlaying || radioPlayer.isLoading {
+            radioPlayer.stop()
+            return
+        }
+
+        if monetizationStore.canPlay {
+            Task { await startPlaybackForSelectedFeed() }
+        } else {
+            isShowingAccessGate = true
+        }
+    }
+
+    private func startPlaybackForSelectedFeed() async {
+        await radioPlayer.start(using: settingsStore.playerSettings, feed: selectedFeed)
     }
 }
 
