@@ -7,9 +7,9 @@ After=network-online.target
 Type=simple
 Restart=always
 RestartSec=5
-EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
-EnvironmentFile=-/boot/phillipsburg-radio.env
 EnvironmentFile=-/etc/phillipsburg-radio/backend.env
+EnvironmentFile=-/boot/phillipsburg-radio.env
+EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
 WorkingDirectory=/opt/phillipsburg-radio/backend
 ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/backend/phillipsburg_radio_server.py
 

@@ -5,7 +5,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
-EnvironmentFile=-/boot/phillipsburg-radio.env
 EnvironmentFile=-/etc/phillipsburg-radio/backend.env
+EnvironmentFile=-/boot/phillipsburg-radio.env
+EnvironmentFile=-/boot/firmware/phillipsburg-radio.env
 ExecStart=/usr/bin/python3 /opt/phillipsburg-radio/backend/broadcastify_api_backend.py

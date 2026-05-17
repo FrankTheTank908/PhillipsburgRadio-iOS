@@ -7,7 +7,7 @@ jobs:
   build:
     name: Build backend image
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -19,106 +19,218 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
           df -h
 
-      - name: Install pi-gen dependencies
+      - name: Install image customization tools
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            coreutils quilt parted qemu-user-binfmt binfmt-support debootstrap zerofree zip \
-            dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync xz-utils \
-            file git curl bc gpg pigz xxd arch-test bmap-tools kmod
+            curl jq xz-utils zip util-linux parted e2fsprogs dosfstools file openssl
 
-      - name: Register arm64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Verify arm64 emulation
+      - name: Download latest Raspberry Pi OS Lite 64-bit image
         run: |
           set -euo pipefail
-          docker run --privileged --rm tonistiigi/binfmt --install arm64
-          docker run --privileged --rm tonistiigi/binfmt
-          sudo update-binfmts --enable qemu-aarch64 || true
-          sudo update-binfmts --display qemu-aarch64 || true
-          arch-test arm64 || true
+          mkdir -p build/pi-image
 
-      - name: Fetch pi-gen
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git pi-gen
+          curl -fsSL \
+            https://downloads.raspberrypi.com/os_list_imagingutility_v4.json \
+            -o build/pi-image/os-list.json
 
-      - name: Prepare custom pi-gen stage
+          IMAGE_URL="$(jq -r '
+            def nodes:
+              . as $item
+              | $item,
+                ($item.subitems[]? | nodes);
+            .os_list[]
+            | nodes
+            | select(.name == "Raspberry Pi OS Lite (64-bit)")
+            | .url
+          ' build/pi-image/os-list.json | head -n 1)"
+
+          IMAGE_SHA256="$(jq -r '
+            def nodes:
+              . as $item
+              | $item,
+                ($item.subitems[]? | nodes);
+            .os_list[]
+            | nodes
+            | select(.name == "Raspberry Pi OS Lite (64-bit)")
+            | .extract_sha256
+          ' build/pi-image/os-list.json | head -n 1)"
+
+          if [ -z "${IMAGE_URL}" ] || [ "${IMAGE_URL}" = "null" ]; then
+            echo "Could not find Raspberry Pi OS Lite (64-bit) in Raspberry Pi Imager OS list."
+            exit 1
+          fi
+
+          echo "Downloading ${IMAGE_URL}"
+          curl -fL --retry 5 --retry-delay 10 \
+            -o build/pi-image/raspios-lite-arm64.img.xz \
+            "${IMAGE_URL}"
+
+          xz -T0 -dk build/pi-image/raspios-lite-arm64.img.xz
+
+          if [ -n "${IMAGE_SHA256}" ] && [ "${IMAGE_SHA256}" != "null" ]; then
+            echo "${IMAGE_SHA256}  build/pi-image/raspios-lite-arm64.img" | sha256sum -c -
+          fi
+
+      - name: Prepare backend config
         env:
           BROADCASTIFY_API_KEY: ${{ secrets.BROADCASTIFY_API_KEY }}
           BACKEND_ADMIN_TOKEN: ${{ secrets.BACKEND_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
+
           if [ -z "${BROADCASTIFY_API_KEY}" ]; then
             echo "Missing required GitHub secret: BROADCASTIFY_API_KEY"
             exit 1
           fi
-
-          cp pi-image/pi-gen-config pi-gen/config
-          cp -R pi-image/stage-phillipsburg pi-gen/stage-phillipsburg
-          chmod +x pi-gen/stage-phillipsburg/00-install-backend/01-run.sh
-
-          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/backend
-          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/systemd
-          mkdir -p pi-gen/stage-phillipsburg/00-install-backend/files/boot
-
-          cp backend/broadcastify_api_backend.py \
-            pi-gen/stage-phillipsburg/00-install-backend/files/backend/
-          cp backend/phillipsburg_radio_server.py \
-            pi-gen/stage-phillipsburg/00-install-backend/files/backend/
-          cp backend/systemd/phillipsburg-radio-backend.service \
-            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
-          cp backend/systemd/phillipsburg-radio-backend.timer \
-            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
-          cp backend/systemd/phillipsburg-radio-server.service \
-            pi-gen/stage-phillipsburg/00-install-backend/files/systemd/
 
           ADMIN_TOKEN="${BACKEND_ADMIN_TOKEN:-}"
           if [ -z "${ADMIN_TOKEN}" ]; then
             ADMIN_TOKEN="$(openssl rand -hex 32)"
           fi
 
+          mkdir -p build/pi-image/config
           sed \
             -e "s|^BROADCASTIFY_API_KEY=.*|BROADCASTIFY_API_KEY=${BROADCASTIFY_API_KEY}|" \
             -e "s|^BACKEND_ADMIN_TOKEN=.*|BACKEND_ADMIN_TOKEN=${ADMIN_TOKEN}|" \
             -e "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://franksplex.com:5214|" \
             backend/phillipsburg-radio.env.template \
-            > pi-gen/stage-phillipsburg/00-install-backend/files/boot/phillipsburg-radio.env
+            > build/pi-image/config/phillipsburg-radio.env
 
-          echo "Backend image config prepared for feed 45951 on port 5214."
+          echo "Prepared backend config for feed 45951 on port 5214."
 
-      - name: Build image
-        working-directory: pi-gen
+      - name: Install backend into Raspberry Pi image
         run: |
           set -euo pipefail
-          sudo CLEAN=1 ./build.sh
 
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pi-gen-build-logs
-          path: |
-            pi-gen/work/**/debootstrap.log
-            pi-gen/work/**/*.log
-            pi-gen/deploy
-          if-no-files-found: ignore
+          IMG="build/pi-image/raspios-lite-arm64.img"
+          ROOT_MOUNT="build/pi-image/rootfs"
+          BOOT_MOUNT="build/pi-image/bootfs"
+          LOOP_DEVICE=""
 
-      - name: Show deployed files
+          cleanup() {
+            set +e
+            if mountpoint -q "${BOOT_MOUNT}"; then
+              sudo umount "${BOOT_MOUNT}"
+            fi
+            if mountpoint -q "${ROOT_MOUNT}"; then
+              sudo umount "${ROOT_MOUNT}"
+            fi
+            if [ -n "${LOOP_DEVICE}" ]; then
+              sudo losetup -d "${LOOP_DEVICE}" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          mkdir -p "${ROOT_MOUNT}" "${BOOT_MOUNT}"
+
+          LOOP_DEVICE="$(sudo losetup --find --show --partscan "${IMG}")"
+          sleep 2
+
+          if [ ! -b "${LOOP_DEVICE}p1" ] || [ ! -b "${LOOP_DEVICE}p2" ]; then
+            sudo partprobe "${LOOP_DEVICE}"
+            sleep 2
+          fi
+
+          sudo mount "${LOOP_DEVICE}p2" "${ROOT_MOUNT}"
+          sudo mount "${LOOP_DEVICE}p1" "${BOOT_MOUNT}"
+
+          sudo install -d "${ROOT_MOUNT}/opt/phillipsburg-radio/backend"
+          sudo install -d "${ROOT_MOUNT}/etc/phillipsburg-radio"
+          sudo install -d "${ROOT_MOUNT}/etc/systemd/system"
+          sudo install -d "${ROOT_MOUNT}/var/lib/phillipsburg-radio"
+
+          sudo install -m 0755 backend/broadcastify_api_backend.py \
+            "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/broadcastify_api_backend.py"
+          sudo install -m 0755 backend/phillipsburg_radio_server.py \
+            "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/phillipsburg_radio_server.py"
+
+          sudo install -m 0644 backend/systemd/phillipsburg-radio-backend.service \
+            "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-backend.service"
+          sudo install -m 0644 backend/systemd/phillipsburg-radio-backend.timer \
+            "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-backend.timer"
+          sudo install -m 0644 backend/systemd/phillipsburg-radio-server.service \
+            "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-server.service"
+
+          sudo install -m 0600 build/pi-image/config/phillipsburg-radio.env \
+            "${ROOT_MOUNT}/etc/phillipsburg-radio/backend.env"
+          sudo install -m 0644 build/pi-image/config/phillipsburg-radio.env \
+            "${BOOT_MOUNT}/phillipsburg-radio.env"
+
+          sudo mkdir -p "${ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants"
+          sudo mkdir -p "${ROOT_MOUNT}/etc/systemd/system/timers.target.wants"
+          sudo ln -sf /etc/systemd/system/phillipsburg-radio-server.service \
+            "${ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/phillipsburg-radio-server.service"
+          sudo ln -sf /etc/systemd/system/phillipsburg-radio-backend.timer \
+            "${ROOT_MOUNT}/etc/systemd/system/timers.target.wants/phillipsburg-radio-backend.timer"
+
+          if [ -e "${ROOT_MOUNT}/lib/systemd/system/ssh.service" ]; then
+            sudo ln -sf /lib/systemd/system/ssh.service \
+              "${ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/ssh.service"
+          fi
+          sudo touch "${BOOT_MOUNT}/ssh"
+
+          echo "Phillipsburg Radio backend installed $(date -u +%Y-%m-%dT%H:%M:%SZ)" | \
+            sudo tee "${ROOT_MOUNT}/opt/phillipsburg-radio/IMAGE_BUILD.txt" >/dev/null
+
+          sync
+
+      - name: Verify customized image
         run: |
           set -euo pipefail
-          find pi-gen/deploy -maxdepth 2 -type f -print -exec ls -lh {} \;
+
+          IMG="build/pi-image/raspios-lite-arm64.img"
+          ROOT_MOUNT="build/pi-image/verify-rootfs"
+          BOOT_MOUNT="build/pi-image/verify-bootfs"
+          LOOP_DEVICE=""
+
+          cleanup() {
+            set +e
+            if mountpoint -q "${BOOT_MOUNT}"; then
+              sudo umount "${BOOT_MOUNT}"
+            fi
+            if mountpoint -q "${ROOT_MOUNT}"; then
+              sudo umount "${ROOT_MOUNT}"
+            fi
+            if [ -n "${LOOP_DEVICE}" ]; then
+              sudo losetup -d "${LOOP_DEVICE}" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          mkdir -p "${ROOT_MOUNT}" "${BOOT_MOUNT}"
+          LOOP_DEVICE="$(sudo losetup --find --show --partscan "${IMG}")"
+          sleep 2
+          sudo mount "${LOOP_DEVICE}p2" "${ROOT_MOUNT}"
+          sudo mount "${LOOP_DEVICE}p1" "${BOOT_MOUNT}"
+
+          test -f "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/broadcastify_api_backend.py"
+          test -f "${ROOT_MOUNT}/opt/phillipsburg-radio/backend/phillipsburg_radio_server.py"
+          test -f "${ROOT_MOUNT}/etc/systemd/system/phillipsburg-radio-server.service"
+          test -L "${ROOT_MOUNT}/etc/systemd/system/multi-user.target.wants/phillipsburg-radio-server.service"
+          test -L "${ROOT_MOUNT}/etc/systemd/system/timers.target.wants/phillipsburg-radio-backend.timer"
+          test -f "${BOOT_MOUNT}/phillipsburg-radio.env"
+
+          if sudo grep -q "BROADCASTIFY_API_KEY=$" "${BOOT_MOUNT}/phillipsburg-radio.env"; then
+            echo "Broadcastify API key was not written into image config."
+            exit 1
+          fi
+
+          echo "Image customization verified."
+
+      - name: Compress customized image
+        run: |
+          set -euo pipefail
+          mkdir -p build/pi-image/deploy
+          xz -T0 -6 -c build/pi-image/raspios-lite-arm64.img \
+            > build/pi-image/deploy/phillipsburg-radio-backend-pi.img.xz
+          file build/pi-image/deploy/phillipsburg-radio-backend-pi.img.xz
+          ls -lh build/pi-image/deploy
 
       - name: Upload Raspberry Pi image artifact
         uses: actions/upload-artifact@v4
         with:
           name: phillipsburg-radio-backend-pi-image
-          path: |
-            pi-gen/deploy/*.zip
-            pi-gen/deploy/*.img
-            pi-gen/deploy/*.xz
+          path: build/pi-image/deploy/phillipsburg-radio-backend-pi.img.xz
           if-no-files-found: error

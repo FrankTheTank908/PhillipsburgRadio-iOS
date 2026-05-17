@@ -62,6 +62,8 @@ BROADCASTIFY_API_KEY
 
 Because the key was visible in a screenshot, consider regenerating or rotating it later if RadioReference gives you that option.
 
+The Raspberry Pi image artifact contains the API key because the image is preconfigured. Keep the GitHub repository private, do not share the Pi image artifact publicly, and delete old workflow artifacts if you rotate the key.
+
 ## What Is Included
 
 - SwiftUI iOS app.
@@ -446,7 +448,9 @@ The GitHub workflow is:
 .github/workflows/build-pi-backend-image.yml
 ```
 
-It uses Raspberry Pi `pi-gen` and exports a flashable Raspberry Pi OS Lite image artifact.
+It downloads the official Raspberry Pi OS Lite 64-bit image, mounts the image partitions on the GitHub runner, copies in the Phillipsburg backend, enables the systemd services, and repacks it as a flashable `.img.xz`.
+
+This workflow does not use `pi-gen`. That avoids ARM emulation failures on GitHub-hosted runners.
 
 Before running it, create this GitHub repository secret:
 
@@ -479,14 +483,18 @@ Steps:
 7. Go to Actions.
 8. Click Build Raspberry Pi backend image.
 9. Click Run workflow.
-10. Wait. This can take a long time.
+10. Wait. The workflow downloads and repacks a full Raspberry Pi OS image, so it can take a while.
 11. Download the artifact:
 
 ```text
 phillipsburg-radio-backend-pi-image
 ```
 
-The artifact contains a compressed Raspberry Pi image.
+The artifact contains:
+
+```text
+phillipsburg-radio-backend-pi.img.xz
+```
 
 Flash it with Raspberry Pi Imager:
 
@@ -494,22 +502,27 @@ Flash it with Raspberry Pi Imager:
 2. Choose your Pi model.
 3. Choose OS.
 4. Choose Use custom.
-5. Select the downloaded backend image.
+5. Select `phillipsburg-radio-backend-pi.img.xz`.
 6. Choose your SD card.
 7. Use Imager settings to configure Wi-Fi and SSH if needed.
 8. Write the image.
 
 No SD-card file editing is required if `BROADCASTIFY_API_KEY` was set as a GitHub secret before building.
 
-Default Pi login in the generated image:
+Important first-boot notes:
+
+- Ethernet is simplest. Plug the Pi into your router before first boot.
+- If you need Wi-Fi, set Wi-Fi in Raspberry Pi Imager before writing the SD card.
+- If you want SSH access, set a username and password in Raspberry Pi Imager before writing the SD card.
+- The backend itself does not require you to SSH in after boot.
+
+The backend config is also written to the boot partition as:
 
 ```text
-username: radio
-password: changeme
-hostname: phillipsburg-radio
+phillipsburg-radio.env
 ```
 
-Change that password after first boot if the Pi will stay on your network.
+If you ever need to fix the API key or admin token manually, shut down the Pi, put the SD card in your computer, open the visible boot drive, edit `phillipsburg-radio.env`, save it, and boot the Pi again.
 
 The backend service runs every 60 seconds:
 
@@ -528,6 +541,23 @@ It listens on:
 ```text
 http://franksplex.com:5214
 ```
+
+To make that public URL reach your Pi, your router must forward:
+
+```text
+TCP port 5214 -> Raspberry Pi local IP port 5214
+```
+
+After booting the Pi and setting the router port forward, test these in a browser:
+
+```text
+http://franksplex.com:5214/health
+http://franksplex.com:5214/current-feed.json
+```
+
+`/health` should show `"service": "phillipsburg-radio-backend"`.
+
+`/current-feed.json` should include a `streamUrl`.
 
 Endpoints:
 
@@ -590,7 +620,27 @@ The app should not crash if the Worker URL is wrong or the stream fails. It show
 
 ## Troubleshooting
 
-If `/health` does not show `broadcastify-api`:
+If the Pi image workflow fails:
+
+- Open the failed GitHub Actions run.
+- Download the logs if GitHub uploads them.
+- The current workflow should not show `pi-gen`, `debootstrap`, or `arm64: not supported`; if it does, your branch is still using the old workflow.
+
+If `http://franksplex.com:5214/health` does not load:
+
+- Confirm the Pi is powered on.
+- Confirm the Pi is on your network.
+- Confirm the router forwards TCP port `5214` to the Pi local IP.
+- Try the Pi local address first, for example `http://192.168.1.50:5214/health`.
+- Make sure your ISP/router allows inbound port forwarding.
+
+If `/health` loads but `/current-feed.json` fails:
+
+- Check the `BROADCASTIFY_API_KEY` GitHub Secret.
+- Rebuild the Pi image after changing the secret.
+- Or edit `phillipsburg-radio.env` on the SD card boot partition.
+
+If the optional Cloudflare Worker `/health` does not show `broadcastify-api`:
 
 ```powershell
 cd C:\Users\Frank\Documents\GitHub\PhillipsburgRadio-iOS\cloudflare-worker
