@@ -43,9 +43,12 @@ Path(os.environ["PIPELINE_STATUS_PATH"]).write_text(
 assert server.STATE.read_incident_summaries(limit=1)[0]["id"] == "inc-test"
 assert server.STATE.pipeline_status()["state"] == "transcribed"
 
-message = server.STATE.add_incident({"text": "Road closure at the bridge", "author": "Unit Test"})
+message = server.STATE.add_incident({"text": "Road closure at the bridge", "author": "Unit Test", "incidentId": "inc-test"})
 assert message["author"] == "Unit Test"
+assert message["incidentId"] == "inc-test"
 assert server.STATE.read_incidents(limit=1)[0]["text"] == "Road closure at the bridge"
+assert server.STATE.read_incidents(limit=1, incident_id="inc-test")[0]["text"] == "Road closure at the bridge"
+assert server.STATE.read_incidents(limit=1, incident_id="inc-other") == []
 
 metadata = server.STATE.metadata()
 assert "/radio-reference/methods" in metadata["routes"]

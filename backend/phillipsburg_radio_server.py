@@ -258,12 +258,16 @@ class BackendState:
         self.log("info", "Transcript event saved")
         return event
 
-    def read_incidents(self, limit: int = 50) -> List[Dict[str, Any]]:
-        return read_jsonl_tail(self.incidents_path, limit)
+    def read_incidents(self, limit: int = 50, incident_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        rows = read_jsonl_tail(self.incidents_path, limit * 4 if incident_id else limit)
+        if incident_id:
+            rows = [row for row in rows if str(row.get("incidentId") or "") == incident_id]
+        return rows[-limit:]
 
     def add_incident(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         message = {
             "id": payload.get("id") or str(uuid.uuid4()),
+            "incidentId": str(payload.get("incidentId") or "").strip() or None,
             "timestamp": payload.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "author": str(payload.get("author") or "Local Debug").strip(),
             "text": str(payload.get("text") or "").strip(),
@@ -468,7 +472,8 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/incidents":
                 limit = int(query.get("limit", ["50"])[0])
                 limit = max(1, min(limit, DEFAULT_MAX_INCIDENTS))
-                self.respond_json({"messages": STATE.read_incidents(limit=limit)})
+                incident_id = query.get("incidentId", query.get("incident_id", [""]))[0].strip() or None
+                self.respond_json({"messages": STATE.read_incidents(limit=limit, incident_id=incident_id)})
                 return
 
             if parsed.path == "/events":

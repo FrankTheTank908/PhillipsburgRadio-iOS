@@ -35,7 +35,7 @@ DEFAULT_EMBED_PLAYER_URL = "https://api.broadcastify.com/embed/player/"
 DEFAULT_LISTENERS_URL_TEMPLATE = "http://api.broadcastify.com/listeners/feed/{feed_id}"
 DEFAULT_REFERER = "http://example.invalid/"
 DEFAULT_FEED_ID = "45951"
-DEFAULT_FEED_TITLE = "Phillipsburg / Easton Public Safety"
+DEFAULT_FEED_TITLE = "Default Scanner Feed"
 DEFAULT_BITRATE = 32
 DEFAULT_OUTPUT_PATH = "/var/lib/phillipsburg-radio/current-feed.json"
 DEFAULT_TTL_SECONDS = 300
@@ -406,7 +406,7 @@ def build_feed_config(payload: Dict[str, Any], fallback_feed_id: str, ttl_second
 
     return {
         "feedId": str(first_value(feed, ["id", "feedId", "feed_id"]) or fallback_feed_id),
-        "title": first_value(feed, ["descr", "description", "name", "title"]) or "Phillipsburg / Easton Public Safety",
+        "title": first_value(feed, ["descr", "description", "name", "title"]) or DEFAULT_FEED_TITLE,
         "status": normalize_status(first_value(feed, ["status", "online"])),
         "listeners": number_or_none(first_value(feed, ["listeners", "listenerCount", "listener_count"])),
         "bitrate": number_or_none(first_value(feed, ["bitrate", "bitRate", "bit_rate"])),

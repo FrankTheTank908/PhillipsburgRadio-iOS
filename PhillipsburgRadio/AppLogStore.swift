@@ -39,7 +39,7 @@ final class AppLogStore: ObservableObject {
 
     func diagnosticText(player: RadioPlayer, settings: SettingsStore) -> String {
         let lines = [
-            "Phillipsburg Radio Diagnostics",
+            "AI Police Scanner Diagnostics",
             "App title: \(AppConfig.appTitle)",
             "Feed title: \(AppConfig.feedTitle)",
             "Config URL: \(settings.trimmedFeedConfigURL)",

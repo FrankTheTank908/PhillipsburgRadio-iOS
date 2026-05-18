@@ -9,13 +9,58 @@ struct ContentView: View {
     @StateObject private var catalogStore = ScannerCatalogStore()
     @StateObject private var monetizationStore = MonetizationStore()
     @StateObject private var rewardedAdStore = RewardedAdStore()
-    @State private var isShowingSettings = false
+    @StateObject private var favoritesStore = FavoritesStore()
     @State private var isShowingAccessGate = false
     @State private var didAutoStart = false
     @State private var incidentDraft = ""
     @State private var selectedFeed: CatalogItem?
+    @State private var selectedIncident: IncidentSummary?
 
     var body: some View {
+        TabView {
+            feedTab
+                .tabItem {
+                    Label("Feed", systemImage: "dot.radiowaves.left.and.right")
+                }
+
+            favoritesTab
+                .tabItem {
+                    Label("Favorites", systemImage: "star.fill")
+                }
+
+            SettingsView(
+                settingsStore: settingsStore,
+                logStore: logStore,
+                radioPlayer: radioPlayer
+            )
+            .tabItem {
+                Label("Settings", systemImage: "gearshape.fill")
+            }
+        }
+        .sheet(isPresented: $isShowingAccessGate) {
+            accessGateSheet
+        }
+        .onAppear {
+            setupApp()
+        }
+        .onChange(of: settingsStore.feedConfigURL) { _ in
+            configureTranscriptPolling()
+            configureIncidentPolling()
+            Task {
+                await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+                await rewardedAdStore.preload(
+                    adUnitID: AppConfig.adMobRewardedAdUnitID,
+                    customData: rewardCustomData
+                )
+            }
+        }
+        .onChange(of: settingsStore.enableTranscriptPolling) { _ in
+            configureTranscriptPolling()
+        }
+    }
+
+    private var feedTab: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -31,72 +76,47 @@ struct ContentView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle(AppConfig.appTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
+        }
+    }
+
+    private var favoritesTab: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Favorites")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        Text("Saved feeds stay on this device for fast playback.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .accessibilityLabel("Settings")
-                }
-            }
-            .sheet(isPresented: $isShowingSettings) {
-                SettingsView(
-                    settingsStore: settingsStore,
-                    logStore: logStore,
-                    radioPlayer: radioPlayer
-                )
-            }
-            .sheet(isPresented: $isShowingAccessGate) {
-                accessGateSheet
-            }
-            .onAppear {
-                radioPlayer.attachLogger(logStore)
-                transcriptStore.attachLogger(logStore)
-                incidentStore.attachLogger(logStore)
-                catalogStore.attachLogger(logStore)
-                monetizationStore.attachLogger(logStore)
-                configureTranscriptPolling()
-                configureIncidentPolling()
-                Task {
-                    await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
-                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
-                    await rewardedAdStore.preload(
-                        adUnitID: AppConfig.adMobRewardedAdUnitID,
-                        customData: rewardCustomData
-                    )
-                }
 
-                guard settingsStore.autoPlayOnLaunch, !didAutoStart else {
-                    return
-                }
+                    panel {
+                        VStack(alignment: .leading, spacing: 12) {
+                            sectionTitle("Saved Feeds", systemImage: "star.fill")
 
-                didAutoStart = true
-                Task {
-                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
-                    if monetizationStore.canPlay {
-                        await startPlaybackForSelectedFeed()
-                    } else {
-                        isShowingAccessGate = true
+                            if favoritesStore.feeds.isEmpty {
+                                Text("Tap the star beside any feed to save it here.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(favoritesStore.feeds) { feed in
+                                    feedRow(feed)
+
+                                    if feed.id != favoritesStore.feeds.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+                .padding(16)
             }
-            .onChange(of: settingsStore.feedConfigURL) { _ in
-                configureTranscriptPolling()
-                configureIncidentPolling()
-                Task {
-                    await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
-                    await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
-                    await rewardedAdStore.preload(
-                        adUnitID: AppConfig.adMobRewardedAdUnitID,
-                        customData: rewardCustomData
-                    )
-                }
-            }
-            .onChange(of: settingsStore.enableTranscriptPolling) { _ in
-                configureTranscriptPolling()
-            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Favorites")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -108,7 +128,7 @@ struct ContentView: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
 
-            Text(selectedFeed?.name ?? "Choose a feed or use the default Phillipsburg / Easton feed")
+            Text(selectedFeed?.name ?? "Choose a worldwide feed")
                 .font(.headline)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -332,7 +352,18 @@ struct ContentView: View {
     private var incidentSection: some View {
         panel {
             VStack(alignment: .leading, spacing: 12) {
-                sectionTitle("Incident Chat", systemImage: "bubble.left.and.text.bubble.right")
+                sectionTitle("Incident Messages", systemImage: "bubble.left.and.text.bubble.right")
+
+                if let selectedIncident {
+                    Text(selectedIncident.title ?? "Scanner Incident")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Open an incident above to view and add messages for that incident.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
 
                 HStack(alignment: .top, spacing: 8) {
                     TextField("Add an incident note", text: $incidentDraft, axis: .vertical)
@@ -349,7 +380,7 @@ struct ContentView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(incidentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || incidentStore.isSending)
+                    .disabled(selectedIncident == nil || incidentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || incidentStore.isSending)
                     .accessibilityLabel("Send incident note")
                 }
 
@@ -360,7 +391,7 @@ struct ContentView: View {
                 }
 
                 if incidentStore.messages.isEmpty {
-                    Text("No incident notes yet.")
+                    Text(selectedIncident == nil ? "No incident selected." : "No messages for this incident yet.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
@@ -446,46 +477,54 @@ struct ContentView: View {
     }
 
     private func feedRow(_ feed: CatalogItem) -> some View {
-        Button {
-            selectedFeed = feed
-            radioPlayer.stop()
-            monetizationStore.clearPlaySession()
-            logStore.info("Selected feed \(feed.name) id=\(feed.resolvedFeedId)")
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
-                    .foregroundStyle(selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? .green : .secondary)
-                    .frame(width: 20)
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                selectFeed(feed)
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right")
+                        .foregroundStyle(selectedFeed?.resolvedFeedId == feed.resolvedFeedId ? .green : .secondary)
+                        .frame(width: 20)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(feed.name)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !feed.displaySubtitle.isEmpty {
-                        Text(feed.displaySubtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(feed.name)
+                            .font(.body)
+                            .foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
 
-                    HStack(spacing: 10) {
-                        if let listeners = feed.listeners {
-                            Label("\(listeners)", systemImage: "person.2")
+                        if !feed.displaySubtitle.isEmpty {
+                            Text(feed.displaySubtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        if let bitrate = feed.bitrate {
-                            Label("\(bitrate) kbps", systemImage: "waveform")
+
+                        HStack(spacing: 10) {
+                            if let listeners = feed.listeners {
+                                Label("\(listeners)", systemImage: "person.2")
+                            }
+                            if let bitrate = feed.bitrate {
+                                Label("\(bitrate) kbps", systemImage: "waveform")
+                            }
+                            Text("ID \(feed.resolvedFeedId)")
                         }
-                        Text("ID \(feed.resolvedFeedId)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
+
+            Button {
+                favoritesStore.toggle(feed)
+            } label: {
+                Image(systemName: favoritesStore.contains(feed) ? "star.fill" : "star")
+                    .foregroundStyle(favoritesStore.contains(feed) ? .yellow : .secondary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(favoritesStore.contains(feed) ? "Remove favorite" : "Add favorite")
         }
-        .buttonStyle(.plain)
         .padding(.vertical, 4)
     }
 
@@ -678,6 +717,14 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Button {
+                selectIncident(incident)
+            } label: {
+                Label(selectedIncident?.id == incident.id ? "Messages Open" : "Open Messages", systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
         .padding(.vertical, 4)
     }
@@ -740,16 +787,62 @@ struct ContentView: View {
     }
 
     private func configureIncidentPolling() {
-        incidentStore.startPolling(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+        incidentStore.startPolling(feedConfigURL: settingsStore.trimmedFeedConfigURL, incidentId: selectedIncident?.id)
     }
 
     private func sendIncident() {
         let text = incidentDraft
         Task {
-            if await incidentStore.send(text: text, feedConfigURL: settingsStore.trimmedFeedConfigURL) {
+            if await incidentStore.send(text: text, feedConfigURL: settingsStore.trimmedFeedConfigURL, incidentId: selectedIncident?.id) {
                 incidentDraft = ""
             }
         }
+    }
+
+    private func setupApp() {
+        radioPlayer.attachLogger(logStore)
+        transcriptStore.attachLogger(logStore)
+        incidentStore.attachLogger(logStore)
+        catalogStore.attachLogger(logStore)
+        monetizationStore.attachLogger(logStore)
+        configureTranscriptPolling()
+        configureIncidentPolling()
+
+        Task {
+            await catalogStore.loadCountries(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+            await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+            await rewardedAdStore.preload(
+                adUnitID: AppConfig.adMobRewardedAdUnitID,
+                customData: rewardCustomData
+            )
+        }
+
+        guard settingsStore.autoPlayOnLaunch, !didAutoStart else {
+            return
+        }
+
+        didAutoStart = true
+        Task {
+            await monetizationStore.refreshEntitlements(feedConfigURL: settingsStore.trimmedFeedConfigURL)
+            if monetizationStore.canPlay {
+                await startPlaybackForSelectedFeed()
+            } else {
+                isShowingAccessGate = true
+            }
+        }
+    }
+
+    private func selectFeed(_ feed: CatalogItem) {
+        selectedFeed = feed
+        radioPlayer.stop()
+        monetizationStore.clearPlaySession()
+        logStore.info("Selected feed \(feed.name) id=\(feed.resolvedFeedId)")
+    }
+
+    private func selectIncident(_ incident: IncidentSummary) {
+        selectedIncident = incident
+        incidentDraft = ""
+        incidentStore.startPolling(feedConfigURL: settingsStore.trimmedFeedConfigURL, incidentId: incident.id)
     }
 
     private func handlePlayTapped() {

@@ -14,10 +14,10 @@ final class IncidentStore: ObservableObject {
         self.logger = logger
     }
 
-    func startPolling(feedConfigURL: String) {
+    func startPolling(feedConfigURL: String, incidentId: String? = nil) {
         stopPolling()
 
-        guard let incidentsURL = makeIncidentsURL(from: feedConfigURL) else {
+        guard let incidentsURL = makeIncidentsURL(from: feedConfigURL, incidentId: incidentId) else {
             lastError = "Incident chat URL could not be built."
             logger?.warning(lastError ?? "Incident chat URL error")
             return
@@ -41,13 +41,13 @@ final class IncidentStore: ObservableObject {
         pollingTask = nil
     }
 
-    func send(text: String, feedConfigURL: String) async -> Bool {
+    func send(text: String, feedConfigURL: String, incidentId: String?) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return false
         }
 
-        guard let incidentsURL = makeIncidentsURL(from: feedConfigURL) else {
+        guard let incidentsURL = makeIncidentsURL(from: feedConfigURL, incidentId: incidentId) else {
             lastError = "Incident chat URL could not be built."
             logger?.warning(lastError ?? "Incident chat URL error")
             return false
@@ -66,7 +66,8 @@ final class IncidentStore: ObservableObject {
                 withJSONObject: [
                     "author": "Frank",
                     "text": trimmed,
-                    "channel": "Incident Chat"
+                    "channel": "Incident Chat",
+                    "incidentId": incidentId ?? ""
                 ],
                 options: []
             )
@@ -108,7 +109,7 @@ final class IncidentStore: ObservableObject {
         }
     }
 
-    private func makeIncidentsURL(from feedConfigURL: String) -> URL? {
+    private func makeIncidentsURL(from feedConfigURL: String, incidentId: String?) -> URL? {
         guard
             let url = URL(string: feedConfigURL),
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -117,7 +118,11 @@ final class IncidentStore: ObservableObject {
         }
 
         components.path = "/incidents"
-        components.queryItems = [URLQueryItem(name: "limit", value: "50")]
+        var queryItems = [URLQueryItem(name: "limit", value: "50")]
+        if let incidentId, !incidentId.isEmpty {
+            queryItems.append(URLQueryItem(name: "incidentId", value: incidentId))
+        }
+        components.queryItems = queryItems
         return components.url
     }
 

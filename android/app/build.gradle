@@ -1,0 +1,27 @@
+plugins {
+    id "com.android.application"
+}
+
+def escapedBuildString(String value) {
+    return value.replace("\\", "\\\\").replace("\"", "\\\"")
+}
+
+def feedConfigUrl = System.getenv("APP_FEED_CONFIG_URL") ?: "http://example.invalid/current-feed.json"
+
+android {
+    namespace "com.frankpinheiro.aipolicescanner"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.frankpinheiro.aipolicescanner"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+        buildConfigField "String", "APP_FEED_CONFIG_URL", "\"${escapedBuildString(feedConfigUrl)}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}

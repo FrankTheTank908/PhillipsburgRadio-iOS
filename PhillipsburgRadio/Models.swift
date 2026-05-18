@@ -175,6 +175,7 @@ struct TranscriptPipelineStatus: Codable {
 
 struct IncidentMessage: Identifiable, Codable {
     let id: UUID
+    let incidentId: String?
     let timestamp: String
     let author: String
     let text: String
@@ -183,6 +184,7 @@ struct IncidentMessage: Identifiable, Codable {
 
     init(
         id: UUID = UUID(),
+        incidentId: String? = nil,
         timestamp: String,
         author: String,
         text: String,
@@ -190,6 +192,7 @@ struct IncidentMessage: Identifiable, Codable {
         channel: String? = nil
     ) {
         self.id = id
+        self.incidentId = incidentId
         self.timestamp = timestamp
         self.author = author
         self.text = text
@@ -199,6 +202,7 @@ struct IncidentMessage: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case incidentId
         case timestamp
         case author
         case text
@@ -209,6 +213,7 @@ struct IncidentMessage: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        incidentId = try container.decodeIfPresent(String.self, forKey: .incidentId)
         timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp) ?? "--:--"
         author = try container.decodeIfPresent(String.self, forKey: .author) ?? "Local Debug"
         text = try container.decode(String.self, forKey: .text)

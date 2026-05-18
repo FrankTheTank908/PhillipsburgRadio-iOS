@@ -17,9 +17,9 @@ enum AppConfig {
         fallback: "http://example.invalid/current-feed.json"
     )
 
-    static let appTitle = "Police Scanner"
-    static let feedTitle = "Worldwide Scanner"
-    static let subtitle = "Browse live public-safety audio by country, state, and county"
+    static let appTitle = "AI Police Scanner"
+    static let feedTitle = "AI Police Scanner"
+    static let subtitle = "Worldwide feeds with AI incident transcripts"
     static let premiumProductID = Bundle.main.stringValue(
         forInfoDictionaryKey: "PremiumProductID",
         fallback: "com.frankpinheiro.scanner.premium.monthly"

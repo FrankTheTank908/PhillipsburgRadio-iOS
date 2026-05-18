@@ -58,8 +58,8 @@ DEFAULT_INCIDENT_MODEL = "gpt-5.5"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_AUDIO_FILTER = "highpass=f=250,lowpass=f=3600,afftdn=nf=-28,loudnorm=I=-18:TP=-2:LRA=11"
 DEFAULT_CONTEXT_PROMPT = (
-    "Scanner audio from the Phillipsburg, New Jersey and Easton, Pennsylvania area. "
-    "It may include police, fire, EMS, dispatch, units, street names, mile markers, and incident updates. "
+    "Public safety scanner audio. "
+    "It may include police, fire, EMS, dispatch, units, street names, mile markers, channels, and incident updates. "
     "Transcribe uncertain words conservatively and do not invent details."
 )
 

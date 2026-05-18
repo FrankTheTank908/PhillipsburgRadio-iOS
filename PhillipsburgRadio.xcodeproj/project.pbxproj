@@ -22,6 +22,7 @@
 		AA0000040000000000000001 /* ScannerCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000011 /* ScannerCatalogStore.swift */; };
 		AA0000040000000000000002 /* MonetizationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000012 /* MonetizationStore.swift */; };
 		AA0000040000000000000003 /* RewardedAdStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000013 /* RewardedAdStore.swift */; };
+		AA0000040000000000000004 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000040000000000000014 /* FavoritesStore.swift */; };
 		AA0000050000000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000050000000000000011 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
@@ -43,6 +44,7 @@
 		AA0000040000000000000011 /* ScannerCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerCatalogStore.swift; sourceTree = "<group>"; };
 		AA0000040000000000000012 /* MonetizationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonetizationStore.swift; sourceTree = "<group>"; };
 		AA0000040000000000000013 /* RewardedAdStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardedAdStore.swift; sourceTree = "<group>"; };
+		AA0000040000000000000014 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -82,6 +84,7 @@
 				AA0000040000000000000011 /* ScannerCatalogStore.swift */,
 				AA0000040000000000000012 /* MonetizationStore.swift */,
 				AA0000040000000000000013 /* RewardedAdStore.swift */,
+				AA0000040000000000000014 /* FavoritesStore.swift */,
 				AA0000010000000000000017 /* Info.plist */,
 				AA0000020000000000000011 /* Assets.xcassets */,
 			);
@@ -185,6 +188,7 @@
 				AA0000040000000000000001 /* ScannerCatalogStore.swift in Sources */,
 				AA0000040000000000000002 /* MonetizationStore.swift in Sources */,
 				AA0000040000000000000003 /* RewardedAdStore.swift in Sources */,
+				AA0000040000000000000004 /* FavoritesStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,7 +348,7 @@
 					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.frankpinheiro.phillipsburgradio;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "AI Police Scanner";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -369,7 +373,7 @@
 					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.frankpinheiro.phillipsburgradio;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "AI Police Scanner";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
